@@ -199,4 +199,3 @@ export default function TeamMemberModal({ member, onClose }: TeamMemberModalProp
     document.body
   );
 }
-
