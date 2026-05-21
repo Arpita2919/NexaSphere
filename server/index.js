@@ -111,6 +111,18 @@ async function writeContent(content) {
   await fs.writeFile(CONTENT_FILE, JSON.stringify(content, null, 2), 'utf8');
 }
 
+let contentLock = Promise.resolve();
+
+function withContentLock(fn) {
+  let release;
+  const next = new Promise((resolve) => {
+    release = resolve;
+  });
+  const current = contentLock;
+  contentLock = next;
+  return current.then(() => fn()).finally(() => release());
+}
+
 export async function supabaseRequest(pathname, { method = 'GET', body } = {}) {
   if (!HAS_SUPABASE) throw new Error('Supabase is not configured');
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
@@ -245,10 +257,12 @@ async function createEventStore(event) {
       updatedAt: row.updated_at,
     });
   }
-  const content = await readContent();
-  content.events.unshift({ ...event, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-  await writeContent(content);
-  return sanitizeEventRecord(content.events[0]);
+  return withContentLock(async () => {
+    const content = await readContent();
+    content.events.unshift({ ...event, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    await writeContent(content);
+    return sanitizeEventRecord(content.events[0]);
+  });
 }
 
 async function updateEventStore(id, patch) {
@@ -280,12 +294,14 @@ async function updateEventStore(id, patch) {
       updatedAt: row.updated_at,
     });
   }
-  const content = await readContent();
-  const idx = content.events.findIndex(e => e.id === id);
-  if (idx < 0) return null;
-  content.events[idx] = { ...content.events[idx], ...patch, id, updatedAt: new Date().toISOString() };
-  await writeContent(content);
-  return sanitizeEventRecord(content.events[idx]);
+  return withContentLock(async () => {
+    const content = await readContent();
+    const idx = content.events.findIndex(e => e.id === id);
+    if (idx < 0) return null;
+    content.events[idx] = { ...content.events[idx], ...patch, id, updatedAt: new Date().toISOString() };
+    await writeContent(content);
+    return sanitizeEventRecord(content.events[idx]);
+  });
 }
 
 async function deleteEventStore(id) {
@@ -293,12 +309,14 @@ async function deleteEventStore(id) {
     const rows = await supabaseRequest(`events?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
     return Array.isArray(rows) && rows.length > 0;
   }
-  const content = await readContent();
-  const before = content.events.length;
-  content.events = content.events.filter(e => e.id !== id);
-  if (content.events.length === before) return false;
-  await writeContent(content);
-  return true;
+  return withContentLock(async () => {
+    const content = await readContent();
+    const before = content.events.length;
+    content.events = content.events.filter(e => e.id !== id);
+    if (content.events.length === before) return false;
+    await writeContent(content);
+    return true;
+  });
 }
 
 async function listActivityEventsStore(activityKey) {
@@ -349,12 +367,14 @@ async function createActivityEventStore(activityKey, event) {
       createdAt: row.created_at,
     });
   }
-  const content = await readContent();
-  content.activityEvents = content.activityEvents || {};
-  content.activityEvents[activityKey] = content.activityEvents[activityKey] || [];
-  content.activityEvents[activityKey].unshift(event);
-  await writeContent(content);
-  return sanitizeActivityEventRecord(event);
+  return withContentLock(async () => {
+    const content = await readContent();
+    content.activityEvents = content.activityEvents || {};
+    content.activityEvents[activityKey] = content.activityEvents[activityKey] || [];
+    content.activityEvents[activityKey].unshift(event);
+    await writeContent(content);
+    return sanitizeActivityEventRecord(event);
+  });
 }
 
 async function deleteActivityEventStore(activityKey, eventId) {
@@ -362,14 +382,16 @@ async function deleteActivityEventStore(activityKey, eventId) {
     const rows = await supabaseRequest(`activity_events?activity_key=eq.${encodeURIComponent(activityKey)}&id=eq.${encodeURIComponent(eventId)}`, { method: 'DELETE' });
     return Array.isArray(rows) && rows.length > 0;
   }
-  const content = await readContent();
-  content.activityEvents = content.activityEvents || {};
-  const list = content.activityEvents[activityKey] || [];
-  const next = list.filter(e => e.id !== eventId);
-  if (next.length === list.length) return false;
-  content.activityEvents[activityKey] = next;
-  await writeContent(content);
-  return true;
+  return withContentLock(async () => {
+    const content = await readContent();
+    content.activityEvents = content.activityEvents || {};
+    const list = content.activityEvents[activityKey] || [];
+    const next = list.filter(e => e.id !== eventId);
+    if (next.length === list.length) return false;
+    content.activityEvents[activityKey] = next;
+    await writeContent(content);
+    return true;
+  });
 }
 
 async function listCoreTeamStore() {
@@ -408,12 +430,14 @@ async function createCoreTeamStore(member) {
       photoUrl: row.photo_url, createdAt: row.created_at
     });
   }
-  const content = await readContent();
-  content.coreTeam = content.coreTeam || [];
-  const newMember = { ...member, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
-  content.coreTeam.push(newMember);
-  await writeContent(content);
-  return sanitizeCoreTeamMemberRecord(newMember);
+  return withContentLock(async () => {
+    const content = await readContent();
+    content.coreTeam = content.coreTeam || [];
+    const newMember = { ...member, id: crypto.randomUUID(), createdAt: new Date().toISOString() };
+    content.coreTeam.push(newMember);
+    await writeContent(content);
+    return sanitizeCoreTeamMemberRecord(newMember);
+  });
 }
 
 async function deleteCoreTeamStore(id) {
@@ -421,13 +445,15 @@ async function deleteCoreTeamStore(id) {
     const rows = await supabaseRequest(`core_team_members?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
     return Array.isArray(rows) && rows.length > 0;
   }
-  const content = await readContent();
-  content.coreTeam = content.coreTeam || [];
-  const before = content.coreTeam.length;
-  content.coreTeam = content.coreTeam.filter(m => String(m.id) !== String(id));
-  if (content.coreTeam.length === before) return false;
-  await writeContent(content);
-  return true;
+  return withContentLock(async () => {
+    const content = await readContent();
+    content.coreTeam = content.coreTeam || [];
+    const before = content.coreTeam.length;
+    content.coreTeam = content.coreTeam.filter(m => String(m.id) !== String(id));
+    if (content.coreTeam.length === before) return false;
+    await writeContent(content);
+    return true;
+  });
 }
 
 async function appendToSupabaseForms(formType, payload) {
