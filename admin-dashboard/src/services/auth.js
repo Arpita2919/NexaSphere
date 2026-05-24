@@ -55,6 +55,8 @@ export const auth = {
     } catch {
       return false;
     }
+    localStorage.removeItem(OFFLINE_FLAG_KEY);
+    sessionStorage.clear();
   },
 
   getToken() { return localStorage.getItem(TOKEN_KEY); },
