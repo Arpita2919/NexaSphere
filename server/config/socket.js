@@ -58,26 +58,70 @@ export function initializeSocketIO(httpServer) {
   });
 
   io.on('connection', (socket) => {
-    logger.info('User connected', { socketId: socket.id, admin: !!socket.adminAuthenticated });
+    _onConnection(socket);
+  });
 
-    // Auto-join authenticated admin sockets to admin room
-    if (socket.adminAuthenticated) {
-      socket.join('admin-room');
+  return io;
+}
+
+/**
+ * Socket.IO connection event handler (exposed for security validation)
+ * @param {Object} socket - Socket.io socket instance
+ */
+export function _onConnection(socket) {
+  logger.info('User connected', { socketId: socket.id, admin: !!socket.adminAuthenticated });
+
+  // Auto-join authenticated admin sockets to admin room
+  if (socket.adminAuthenticated) {
+    socket.join('admin-room');
+  }
+
+  // Keep track of identify operations to rate limit floods per-socket (Max 3 events per lifetime)
+  let identifyCount = 0;
+
+  // Store connected user
+  socket.on('user:identify', (userData) => {
+    // 1. Enforce Per-Socket Identification Rate Limiting
+    identifyCount++;
+    if (identifyCount > 3) {
+      logger.warn('Socket identification flood detected, forcing disconnect', { socketId: socket.id });
+      socket.disconnect(true);
+      return;
     }
 
-    // Store connected user
-    socket.on('user:identify', (userData) => {
-      connectedUsers.set(socket.id, {
-        id: userData.userId,
-        email: userData.email,
-        socketId: socket.id,
-        connectedAt: new Date(),
-      });
-      logger.info('User identified', { userId: userData.userId, socketId: socket.id });
-    });
+    // 2. Defensive Payload Structure & Type Validation
+    if (!userData || typeof userData !== 'object') {
+      logger.warn('Invalid user identification payload type rejected', { socketId: socket.id });
+      return;
+    }
 
-    // Join notification room
-    socket.on('room:join', (roomName) => {
+    const { userId, email } = userData;
+
+    // Validate fields exist and are strictly primitive strings
+    if (typeof userId !== 'string' || typeof email !== 'string') {
+      logger.warn('User identification payload fields must be primitive strings', { socketId: socket.id });
+      return;
+    }
+
+    // 3. Strict Size Bounds (128 char for IDs, 256 for Email)
+    if (userId.length > 128 || email.length > 256) {
+      logger.warn('Oversized user identification payload values rejected', { socketId: socket.id });
+      return;
+    }
+
+    // 4. Safe Deep Copy (Persist sanitized primitives)
+    connectedUsers.set(socket.id, {
+      id: String(userId),
+      email: String(email),
+      socketId: String(socket.id),
+      connectedAt: new Date(),
+    });
+    
+    logger.info('User identified successfully', { userId: String(userId), socketId: socket.id });
+  });
+
+  // Join notification room
+  socket.on('room:join', (roomName) => {
       if (PROTECTED_ROOMS.includes(roomName) && !socket.adminAuthenticated) {
         logger.warn('Unauthorized room join attempt', { socketId: socket.id, room: roomName });
         return socket.emit('room:join:error', { error: 'Authentication required to join this room' });
@@ -163,9 +207,6 @@ export function initializeSocketIO(httpServer) {
     socket.on('error', (error) => {
       logger.error('Socket error', { error: error.message, socketId: socket.id });
     });
-  });
-
-  return io;
 }
 
 /**
@@ -229,4 +270,8 @@ export function getRoom(roomType) {
   return rooms[roomType] || null;
 }
 
-export default { initializeSocketIO, getIO, broadcastEvent, emitToRoom, emitToUser };
+export function _clearConnectedUsers() {
+  connectedUsers.clear();
+}
+
+export default { initializeSocketIO, getIO, broadcastEvent, emitToRoom, emitToUser, _clearConnectedUsers, _onConnection };
