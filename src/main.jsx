@@ -10,11 +10,13 @@ import { HelmetProvider } from 'react-helmet-async';
 
 
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
+ <StrictMode>
     <HelmetProvider>
-      <GlobalErrorBoundary>
-        <App />
-      </GlobalErrorBoundary>
+      <ThemeProvider>
+        <GlobalErrorBoundary>
+          <App />
+        </GlobalErrorBoundary>
+      </ThemeProvider>
     </HelmetProvider>
   </StrictMode>
 );
