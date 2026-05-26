@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { generatePrefixedId } from '../utils/uuid.js';
 
 const tagsSchema = z
   .union([z.array(z.string()).min(0), z.string()])
@@ -32,7 +33,8 @@ export const eventSchema = z
       String(data.shortName || data.name)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '') || `event-${Date.now()}`;
+        .replace(/^-+|-+$/g, '') || generatePrefixedId('event');
+
 
     return {
       ...data,
