@@ -52,3 +52,8 @@ GitHub_Issues/
 server/logs/
 *.log
 
+
+issues*.json
+ci-logs.txt
+*_EXAMPLE*.js
+*_EXAMPLE*.jsx
