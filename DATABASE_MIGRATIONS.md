@@ -1,391 +1,218 @@
-# 🗄️ Database Migrations Guide
+# Database Migrations
 
-## Overview
+NexaSphere uses a multi-stack architecture with three database backends, each with its own migration system.
 
-NexaSphere adopts a **versioned, coordinated database migration strategy** to ensure schema consistency, enable safe rollbacks, and maintain audit trails across all backend services.
+## Migration Systems
 
-### Why Migrations Matter
-- **Schema Versioning**: Every database change is tracked and reversible
-- **Multi-Service Coordination**: Prevents schema drift between Node.js, Java, and Python backends
-- **Production Safety**: Deployments can be rolled back if issues arise
-- **CI/CD Integration**: Automated schema validation in test environments
-- **Audit Trail**: Complete history of all database changes with timestamps
+### Node.js Server (`server/migrations/`)
 
----
+- **Tool**: Node-pg-migrate
+- **Database**: PostgreSQL
+- **Config**: `server/.postgres_migrations_config.json`
 
-## 🛠️ Migration Tools by Service
+| Migration | Description |
+|-----------|-------------|
+| `1705945200000_create-initial-schema.js` | Baseline schema for admin sessions, events, core team, form submissions, and recommendation engine tables |
+| `1705945201000_seed-recommendation-data.js` | Seed data for collaborative filtering recommendation system |
+| `1705945202000_canonicalize-portfolio-usernames.js` | Canonicalize portfolio username format |
 
-### Node.js Backend (`server/`)
-**Tool**: [node-pg-migrate](https://github.com/salsita/node-pg-migrate)
-- **Location**: `server/migrations/`
-- **Config**: `server/.postgres_migrations_config.js`
-- **Naming**: `{timestamp}_{description}.js`
-- **Format**: JavaScript (supports async/await)
+### Java Server (`server-java/src/main/resources/db/migration/`)
 
-### Java Backend (`server-java/`)
-**Tool**: [Flyway](https://flywaydb.org/)
-- **Location**: `server-java/src/main/resources/db/migration/`
-- **Config**: Embedded in `pom.xml` (Spring Boot auto-config)
-- **Naming**: `V{version}__{description}.sql`
-- **Format**: SQL (strictly SQL-based)
+- **Tool**: Flyway
+- **Database**: PostgreSQL / H2 (dev fallback)
+- **Config**: `application.properties`
 
-### Python Backend (`server-python/`)
-**Tool**: [Alembic](https://alembic.sqlalchemy.org/)
-- **Location**: `server-python/alembic/versions/`
-- **Config**: `server-python/alembic.ini` and `server-python/alembic/env.py`
-- **Naming**: `{revision_id}_{description}.py`
-- **Format**: Python (with Alembic DSL and raw SQL support)
+| Migration | Description |
+|-----------|-------------|
+| `V1__Create_Initial_Schema.sql` | Baseline schema — admin sessions, events, activity events, core team, form submissions, recommendation engine tables |
+| `V2__Seed_Recommendation_Data.sql` | Seed data for recommendation engine (profiles, events, participation history) |
+| `V3__Extend_Event_Metadata.sql` | Extended events table with KSS metadata fields (category, dates, capacity, location) and dynamic gradient colors |
+| `V4__Create_Certificate_System.sql` | Certificate templates, participants, and issued certificates tables |
+| `V5__Add_Recruitment_Submissions.sql` | Dedicated table for core team recruitment applications with status tracking |
 
----
+### Python Server (`server-python/alembic/versions/`)
 
-## 📋 Creating New Migrations
+- **Tool**: Alembic
+- **Database**: PostgreSQL
+- **Config**: `server-python/alembic.ini`
 
-### Scenario 1: Adding a New Table
+| Migration | Description |
+|-----------|-------------|
+| `001_initial_schema.py` | Initial schema creation |
+| `002_seed_recommendation_data.py` | Seed data for recommendation engine |
 
-#### Node.js (Knex)
+## Running Migrations
+
+### Node.js
 ```bash
 cd server
-npm run migrate:create -- add_new_table_name
-# Edit migrations/{timestamp}_add_new_table_name.js
-npm run migrate:latest
+npm run migrate:latest    # Apply all pending migrations
+npm run migrate:rollback  # Rollback last migration batch
 ```
 
-Example migration file:
-```javascript
-exports.up = (pgm) => {
-  pgm.createTable('my_table', {
-    id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-    name: { type: 'text', notNull: true },
-    created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
-  });
-  pgm.createIndex('my_table', 'name');
-};
-
-exports.down = (pgm) => {
-  pgm.dropTable('my_table');
-};
-```
-
-#### Java (Flyway)
-Create a new SQL file: `server-java/src/main/resources/db/migration/V{N+1}__{description}.sql`
-
-Example:
-```sql
--- V3__Add_New_Table.sql
-CREATE TABLE my_table (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_my_table_name ON my_table (name);
-```
-
-Flyway runs automatically when Spring Boot starts.
-
-#### Python (Alembic)
-```bash
-cd server-python
-# Generate empty migration
-alembic revision -m "add new table"
-
-# Edit alembic/versions/{revision_id}_{description}.py
-# Then upgrade
-alembic upgrade head
-```
-
-Example migration:
-```python
-def upgrade() -> None:
-    op.create_table(
-        'my_table',
-        sa.Column('id', sa.UUID(), nullable=False, server_default=sa.func.gen_random_uuid()),
-        sa.Column('name', sa.Text(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('idx_my_table_name', 'my_table', ['name'])
-
-def downgrade() -> None:
-    op.drop_index('idx_my_table_name', table_name='my_table')
-    op.drop_table('my_table')
-```
-
----
-
-### Scenario 2: Modifying a Column
-
-#### Node.js (Knex)
-```javascript
-exports.up = (pgm) => {
-  pgm.alterColumn('events', 'status', {
-    type: 'text',
-    default: 'completed',
-  });
-};
-
-exports.down = (pgm) => {
-  pgm.alterColumn('events', 'status', {
-    type: 'text',
-    default: 'upcoming',
-  });
-};
-```
-
-#### Java (Flyway)
-```sql
--- V4__Modify_Events_Status.sql
-ALTER TABLE events
-  ALTER COLUMN status SET DEFAULT 'completed';
-```
-
-#### Python (Alembic)
-```python
-def upgrade() -> None:
-    op.alter_column('events', 'status', new_column_name='status', server_default='completed')
-
-def downgrade() -> None:
-    op.alter_column('events', 'status', new_column_name='status', server_default='upcoming')
-```
-
----
-
-## 🚀 Common Commands
-
-### Node.js (node-pg-migrate)
-```bash
-# List pending migrations
-npm run migrate
-
-# Apply all pending migrations
-npm run migrate:latest
-
-# Rollback one migration
-npm run migrate:rollback
-
-# Reset database (dangerous!)
-npm run migrate:reset
-
-# Create new migration
-npm run migrate:create -- description_of_change
-```
-
-### Java (Flyway via Spring Boot)
+### Java
+Migrations run automatically on application startup via Flyway. To run manually:
 ```bash
 cd server-java
-
-# Flyway runs automatically on startup
-mvn spring-boot:run
-
-# Validate schema
-mvn flyway:validate
-
-# Info about migrations
-mvn flyway:info
-
-# Repair schema (use carefully!)
-mvn flyway:repair
+mvn flyway:migrate
 ```
 
-### Python (Alembic)
+### Python
 ```bash
 cd server-python
+alembic upgrade head       # Apply all pending migrations
+alembic downgrade -1       # Rollback one migration
+```
 
-# Create new migration
-alembic revision -m "description of change"
+## Adding New Migrations
+
+- **Node.js**: Create a new timestamped file in `server/migrations/` following the naming convention `YYYYMMDDHHMMSS_description.js`
+- **Java**: Create a new versioned file in `server-java/src/main/resources/db/migration/` named `V{N}__Description.sql` where N is the next version number
+- **Python**: Use `alembic revision -m "description"` to generate a new migration file in `server-python/alembic/versions/`
+
+## Best Practices
+
+1. **Always test migrations** against a clean database before merging
+2. **Never modify applied migrations** — create a new one instead
+3. **Use `IF NOT EXISTS` / `IF EXISTS`** guards where possible for idempotency
+4. **Include rollback logic** in Node.js and Python migrations
+5. **Document schema changes** in this file when adding new migrations
+NexaSphere uses a multi-stack architecture with three independent database migration systems — one per server implementation. All migration suites target a **PostgreSQL** database.
+
+---
+
+## Migration Systems Overview
+
+| Stack | Tool | Directory | Config |
+|-------|------|-----------|--------|
+| Node.js | [node-postgres-migrate](https://github.com/brianbrunner/yowl) / `db-migrate` | `server/migrations/` | `server/.postgres_migrations_config.json` |
+| Java (Spring Boot) | [Flyway](https://flywaydb.org/) | `server-java/src/main/resources/db/migration/` | `server-java/pom.xml` |
+| Python (FastAPI) | [Alembic](https://alembic.sqlalchemy.org/) | `server-python/alembic/versions/` | `server-python/alembic.ini` |
+
+---
+
+## Node.js Migrations (`server/`)
+
+Migration files live in `server/migrations/` and are managed via `npm run migrate:latest` / `npm run migrate:rollback`.
+
+### Files
+
+| File | Description |
+|------|-------------|
+| `1705945200000_create-initial-schema.js` | Creates the initial database schema — users, events, activities, and core team tables. |
+| `1705945201000_seed-recommendation-data.js` | Seeds initial recommendation/sample data for development and testing. |
+| `1705945202000_canonicalize-portfolio-usernames.js` | Normalises existing portfolio usernames to a canonical lowercase format. |
+
+### Running Migrations
+
+```bash
+# Apply all pending migrations
+npm --prefix server run migrate:latest
+
+# Roll back the most recent migration
+npm --prefix server run migrate:rollback
+
+# Check current migration version
+npm --prefix server run migrate -- --version
+```
+
+### Environment Variables
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgres://user:pass@localhost:5432/nexasphere` | Full PostgreSQL connection string |
+
+---
+
+## Java Migrations (`server-java/`)
+
+Migration files follow the Flyway naming convention (`V{version}__{description}.sql`) and live in `server-java/src/main/resources/db/migration/`. Flyway runs automatically on Spring Boot startup.
+
+### Files
+
+| File | Description |
+|------|-------------|
+| `V1__Create_Initial_Schema.sql` | Creates the initial database schema for the Spring Boot application. |
+| `V2__Seed_Recommendation_Data.sql` | Populates seed data used for the recommendation engine. |
+| `V3__Extend_Event_Metadata.sql` | Adds additional metadata columns to the events table (location, capacity, gradient colors). |
+
+### Running Migrations
+
+Flyway migrations execute automatically when the Spring Boot application starts. To validate without starting the app:
+
+```bash
+cd server-java
+mvn clean validate
+```
+
+### Configuration
+
+Flyway is declared as a Maven dependency in `pom.xml`. The datasource is configured via environment variables or `application.properties`:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/nexasphere
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+spring.flyway.enabled=true
+```
+
+---
+
+## Python Migrations (`server-python/`)
+
+Migration files are managed by Alembic and live in `server-python/alembic/versions/`. Alembic is configured via `server-python/alembic.ini`.
+
+### Files
+
+| File | Description |
+|------|-------------|
+| `001_initial_schema.py` | Creates the initial schema for the Python/FastAPI server. |
+| `002_seed_recommendation_data.py` | Seeds initial data for recommendations and activities. |
+
+### Running Migrations
+
+```bash
+cd server-python
 
 # Apply all pending migrations
 alembic upgrade head
 
-# Rollback one migration
+# Roll back one migration
 alembic downgrade -1
 
 # Show current revision
 alembic current
 
-# Show revision history
-alembic history
-
-# Validate that pending migrations don't have syntax errors
+# Generate SQL for pending migrations (dry-run)
 alembic upgrade head --sql
 ```
 
----
+### Environment Variables
 
-## 🔄 Coordinated Multi-Service Deployments
-
-### Deployment Workflow
-
-1. **Create Migrations** (before merging PR):
-   - Create migration in each affected service
-   - Test locally against PostgreSQL
-   - Update version numbers in documentation
-
-2. **Code Review**:
-   - Review migration logic for correctness
-   - Ensure reversibility (no `DROP` without `CREATE` in `down()`)
-   - Verify backward compatibility if services are updated separately
-
-3. **Testing**:
-   - Run migrations on fresh test database
-   - Run app boot tests to verify schema is compatible with models
-   - Integration tests pass
-
-4. **Deployment Order** (if possible):
-   - Deploy migrations first (additive changes only)
-   - Deploy application code that uses new schema
-   - Monitor for errors; rollback if needed
-
-5. **Rollback** (if needed):
-   - Each service can independently rollback its migration
-   - Ensure coordinated rollback if services depend on each other
-
-### Example: Adding New Column to Events Table
-
-**Step 1**: Create migration in Node.js
-```javascript
-// server/migrations/{ts}_add_category_to_events.js
-exports.up = (pgm) => {
-  pgm.addColumn('events', {
-    category: { type: 'text', default: 'general' },
-  });
-};
-exports.down = (pgm) => {
-  pgm.dropColumn('events', 'category');
-};
-```
-
-**Step 2**: Create migration in Java
-```sql
--- server-java/src/main/resources/db/migration/V3__Add_Category_To_Events.sql
-ALTER TABLE events
-  ADD COLUMN category text DEFAULT 'general';
-```
-
-**Step 3**: Create migration in Python
-```python
-# server-python/alembic/versions/003_add_category_to_events.py
-def upgrade() -> None:
-    op.add_column('events', sa.Column('category', sa.Text(), server_default='general'))
-
-def downgrade() -> None:
-    op.drop_column('events', 'category')
-```
-
-**Step 4**: Update application code in all services to use `category`
-
-**Step 5**: Deploy migrations first, then code
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql://user:pass@localhost:5432/nexasphere` | Full PostgreSQL connection string |
 
 ---
 
-## ✅ Migration Best Practices
+## CI Validation
 
-### Do's ✓
-- ✅ Make migrations small and focused (one change per file)
-- ✅ Always write both `up()` and `down()` (rollback support)
-- ✅ Use transactions for safety (auto-enabled in most tools)
-- ✅ Test migrations on a fresh database
-- ✅ Use descriptive naming: `add_user_phone_column`, not `schema_fix`
-- ✅ Document complex migrations with comments
-- ✅ Version migrations semantically: `V1_*`, `V2_*`, etc.
-- ✅ Add constraints and indices for performance
-- ✅ Coordinate across services before deploying
+The **Database Migrations CI** workflow (`.github/workflows/db-migrations-ci.yml`) runs automatically on `push` to `main` or on pull requests that modify migration files. It performs the following jobs:
 
-### Don'ts ✗
-- ❌ Don't skip writing rollback functions
-- ❌ Don't use comments in Java/Flyway migrations before column definitions
-- ❌ Don't make assumptions about execution order across services
-- ❌ Don't forget to update `.env.example` if new env vars are needed
-- ❌ Don't deploy breaking schema changes without coordination
-- ❌ Don't directly edit production databases without logging migrations
-- ❌ Don't merge PRs without migrations for schema changes
+| Job | Description |
+|-----|-------------|
+| `Validate Node.js Migrations` | Spins up a PostgreSQL service, installs dependencies, runs migrations, and tests rollback. |
+| `Validate Java Migrations` | Validates Flyway SQL files and checks the Maven build. |
+| `Validate Python Migrations` | Validates Alembic migration Python files and tests the DB connection. |
+| `Check Migration Documentation` | Verifies this file (`DATABASE_MIGRATIONS.md`) exists and all migration directories are present. |
+| `Migration Validation Summary` | Aggregates all job results and fails the workflow if any job failed. |
 
 ---
 
-## 🔍 Troubleshooting
+## Best Practices
 
-### Migration Fails to Apply
-
-**Node.js**:
-```bash
-# Check current state
-npm run migrate -- --dryRun
-
-# Manually inspect pgmigrations table
-psql $DATABASE_URL -c "SELECT * FROM pgmigrations ORDER BY run_on DESC;"
-```
-
-**Java**:
-```bash
-# Check Flyway schema_version table
-mvn flyway:info
-
-# Repair broken state (use cautiously)
-mvn flyway:repair
-```
-
-**Python**:
-```bash
-# Check Alembic history
-alembic history
-
-# View current state
-alembic current
-
-# See pending migrations as SQL
-alembic upgrade head --sql
-```
-
-### Schema Mismatch Between Services
-
-**Diagnosis**:
-1. Check each service's migration history:
-   - Node.js: `SELECT * FROM pgmigrations;`
-   - Java: `SELECT * FROM flyway_schema_history;`
-   - Python: `SELECT * FROM alembic_version;`
-
-2. Identify which service is ahead
-
-3. Apply pending migrations to other services
-
----
-
-## 🔒 Production Safety Checklist
-
-Before deploying migrations to production:
-
-- [ ] Migrations tested on staging database
-- [ ] Rollback procedure documented and tested
-- [ ] All services' migrations coordinated
-- [ ] Backup of production database taken
-- [ ] Deployment window scheduled
-- [ ] Monitoring alerts configured for migration errors
-- [ ] Team notified of planned changes
-- [ ] Runbook updated for new schema changes
-
----
-
-## 📚 References
-
-- **Node.js**: [node-pg-migrate docs](https://github.com/salsita/node-pg-migrate)
-- **Java**: [Flyway docs](https://flywaydb.org/documentation)
-- **Python**: [Alembic docs](https://alembic.sqlalchemy.org/)
-- **PostgreSQL**: [Official docs](https://www.postgresql.org/docs/)
-
----
-
-## 🤝 Contributing
-
-When adding new migrations:
-
-1. Follow the tool-specific syntax and conventions
-2. Write descriptive migration names
-3. Test locally against PostgreSQL
-4. Include comments explaining complex logic
-5. Update this guide if adding new patterns
-6. Link to GitHub issue/PR in migration comments
-
----
-
-**Last Updated**: May 2026
-**Maintained by**: NexaSphere Core Team
+1. **Never edit an existing migration file** after it has been merged to `main`. Create a new migration instead.
+2. **Name migrations descriptively** — use timestamps (Node.js), version numbers with double underscores (Flyway), or sequential numbers (Alembic).
+3. **Always write a rollback** for Node.js migrations (`exports.down`).
+4. **Test locally** before opening a PR — run your migration against a fresh DB to catch issues early.
+5. **Update this document** when adding new migration files so the CI documentation check passes.

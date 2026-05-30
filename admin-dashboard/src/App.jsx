@@ -1,13 +1,16 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from './hooks/useAuth';
 import { Sidebar } from './components/Sidebar';
 import { Toast } from './components/Toast';
 import { OfflineBanner } from './components/OfflineBanner';
 import { LoginPage } from './pages/LoginPage';
+import { UnauthorizedPage } from './pages/UnauthorizedPage';
 import { DashboardHome } from './pages/DashboardHome';
 import { EventsManager } from './pages/EventsManager';
 import { ActivityEventsManager } from './pages/ActivityEventsManager';
 import { CoreTeamManager } from './pages/CoreTeamManager';
 import { MembershipResponsesManager } from './pages/MembershipResponsesManager';
+import { RecruitmentResponsesManager } from './pages/RecruitmentResponsesManager';
 import { CertificateManager } from './pages/CertificateManager';
 import './styles/admin.css';
 
@@ -54,6 +57,7 @@ export default function App() {
             <Route path="/dashboard/activity-events" element={<ActivityEventsManager />} />
             <Route path="/dashboard/core-team" element={<CoreTeamManager />} />
             <Route path="/dashboard/membership" element={<MembershipResponsesManager />} />
+            <Route path="/dashboard/recruitment" element={<RecruitmentResponsesManager />} />
             <Route path="/dashboard/certificates" element={<CertificateManager />} />
           </Route>
         </Route>
