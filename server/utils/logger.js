@@ -9,11 +9,31 @@ import path from 'path';
 import DailyRotateFile from 'winston-daily-rotate-file';
 
 // Create logs directory if it doesn't exist
-import fs from 'fs';
-const logsDir = path.join(process.cwd(), 'logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+// Create logs directory if it doesn't exist (with permission handling)
+import fs from "fs";
+const logsDir = path.join(process.cwd(), "logs");
+
+function ensureLogsDirectory() {
+  try {
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+    return true;
+  } catch (error) {
+    const fallbackCodes = ["EACCES", "EROFS", "EPERM"];
+    if (fallbackCodes.includes(error.code)) {
+      console.warn(
+        `[Logger Warning]: Storage is read-only or restricted (${error.code}). ` +
+        `Falling back gracefully to console logging.`
+      );
+    } else {
+      console.error(`[Logger Error]: Unexpected filesystem failure: ${error.message}`);
+    }
+    return false;
+  }
 }
+
+const isStorageWritable = ensureLogsDirectory();
 
 // Define log levels
 const levels = {
@@ -59,45 +79,44 @@ const baseFileFormat = winston.format.combine(
   })
 );
 
-// 2. Apply separate configurations inside your transports array
-const transports = [
-  // Console gets colors added cleanly on top of the base format
+// Define transports safely based on storage permissions
+const activeTransports = [
   new winston.transports.Console({
     format: winston.format.combine(
       winston.format.colorize({ all: true }),
       baseFileFormat
     ),
   }),
-
-  // Files use the base format directly (ensures 100% clean plain text)
-  new winston.transports.File({
-    filename: path.join(logsDir, "error.log"),
-    level: "error",
-    format: baseFileFormat,
-  }),
-
-  new winston.transports.File({
-    filename: path.join(logsDir, "combined.log"),
-    format: baseFileFormat,
-  }),
-
-  new DailyRotateFile({
-    filename: path.join(logsDir, "application-%DATE%.log"),
-    datePattern: "YYYY-MM-DD",
-    maxSize: "20m",
-    maxFiles: "14d",
-    format: baseFileFormat,
-    utc: true,
-  }),
 ];
 
+if (isStorageWritable) {
+  activeTransports.push(
+    new winston.transports.File({
+      filename: path.join(logsDir, "error.log"),
+      level: "error",
+      format: winston.format.uncolorize(),
+    }),
+    new winston.transports.File({
+      filename: path.join(logsDir, "combined.log"),
+      format: winston.format.uncolorize(),
+    }),
+    new DailyRotateFile({
+      filename: path.join(logsDir, "application-%DATE%.log"),
+      datePattern: "YYYY-MM-DD",
+      maxSize: "20m",
+      maxFiles: "14d",
+      format: winston.format.uncolorize(),
+      utc: true,
+    })
+  );
+}
 // Create logger instance
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   levels,
-  format: baseFileFormat, //  FIX: Use the uncolorized base format here
-  transports,
-  exceptionHandlers: [
+  format,
+  transports: activeTransports, 
+  exceptionHandlers: isStorageWritable ? [
     new DailyRotateFile({
       filename: path.join(logsDir, "exceptions-%DATE%.log"),
       datePattern: "YYYY-MM-DD",
@@ -106,8 +125,8 @@ const logger = winston.createLogger({
       format: baseFileFormat, //  FIX: Ensures clean exception dumps
       utc: true,
     }),
-  ],
-  rejectionHandlers: [
+  ] : undefined, 
+  rejectionHandlers: isStorageWritable ? [
     new DailyRotateFile({
       filename: path.join(logsDir, "rejections-%DATE%.log"),
       datePattern: "YYYY-MM-DD",
@@ -116,7 +135,5 @@ const logger = winston.createLogger({
       format: baseFileFormat, //  FIX: Ensures clean rejection dumps
       utc: true,
     }),
-  ],
+  ] : undefined, 
 });
-
-export default logger;
