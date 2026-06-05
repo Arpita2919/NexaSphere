@@ -3,9 +3,10 @@
  * Structured logging for all backend operations
  */
 
-import winston from "winston";
-import path from "path";
-import DailyRotateFile from "winston-daily-rotate-file";
+import winston from 'winston';
+import { appContext } from '../config/appContext.js';
+import path from 'path';
+import DailyRotateFile from 'winston-daily-rotate-file';
 
 // Create logs directory if it doesn't exist
 // Create logs directory if it doesn't exist (with permission handling)
@@ -45,26 +46,24 @@ const levels = {
 
 // Define colors for console output
 const colors = {
-  error: "red",
-  warn: "yellow",
-  info: "green",
-  http: "magenta",
-  debug: "white",
+  error: 'red',
+  warn: 'yellow',
+  info: 'green',
+  http: 'magenta',
+  debug: 'white',
 };
 
 winston.addColors(colors);
 
 // Define log format
 const format = winston.format.combine(
-  winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
   winston.format.errors({ stack: true }),
   winston.format.printf((info) => {
-    const { timestamp, level, message, ...args } = info;
-
-    const ts = timestamp.slice(0, 19).replace("T", " ");
-
-    return `${ts} [${level}]: ${message} ${
-      Object.keys(args).length ? JSON.stringify(args, null, 2) : ""
+    const store = appContext.getStore();
+    const reqId = store?.reqId ? `[${store.reqId}] ` : '';
+    return `${info.timestamp} ${reqId}[${info.level}]: ${info.message} ${
+      info.stack ? `\n${info.stack}` : ''
     }`;
   })
 );
@@ -72,10 +71,7 @@ const format = winston.format.combine(
 // Define transports safely based on storage permissions
 const activeTransports = [
   new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize({ all: true }),
-      format
-    ),
+    format: winston.format.combine(winston.format.colorize({ all: true }), format),
   }),
 ];
 
@@ -102,26 +98,26 @@ if (isStorageWritable) {
 }
 // Create logger instance
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || "info",
+  level: process.env.LOG_LEVEL || 'info',
   levels,
   format,
   transports: activeTransports, 
   exceptionHandlers: isStorageWritable ? [
     new DailyRotateFile({
-      filename: path.join(logsDir, "exceptions-%DATE%.log"),
-      datePattern: "YYYY-MM-DD",
-      maxSize: "20m",
-      maxFiles: "14d",
+      filename: path.join(logsDir, 'exceptions-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      maxSize: '20m',
+      maxFiles: '14d',
       format: winston.format.uncolorize(),
       utc: true,
     }),
   ] : undefined, 
   rejectionHandlers: isStorageWritable ? [
     new DailyRotateFile({
-      filename: path.join(logsDir, "rejections-%DATE%.log"),
-      datePattern: "YYYY-MM-DD",
-      maxSize: "20m",
-      maxFiles: "14d",
+      filename: path.join(logsDir, 'rejections-%DATE%.log'),
+      datePattern: 'YYYY-MM-DD',
+      maxSize: '20m',
+      maxFiles: '14d',
       format: winston.format.uncolorize(),
       utc: true,
     }),
