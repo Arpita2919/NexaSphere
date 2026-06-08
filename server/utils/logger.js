@@ -78,12 +78,37 @@ const format = winston.format.combine(
 const transports = [
   // Console transport (Colorizes exclusively for terminal output)
   new winston.transports.Console({
+    level: consoleLevel, // <-- Add this line
     format: winston.format.combine(
       winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
       winston.format.errors({ stack: true }),
       winston.format.colorize({ all: true }),
       logLayout
     ),
+  }),
+
+  // Error logs
+  new winston.transports.File({
+    filename: path.join(logsDir, "error.log"),
+    level: "error",
+    format: winston.format.uncolorize(),
+  }),
+
+  new winston.transports.File({
+    filename: path.join(logsDir, "combined.log"),
+    level: fileBaselineLevel, // <-- Add this line
+    format: winston.format.uncolorize(),
+  }),
+
+  // Daily rotate logs (requires winston-daily-rotate-file)
+  new DailyRotateFile({
+    filename: path.join(logsDir, "application-%DATE%.log"),
+    datePattern: "YYYY-MM-DD",
+    level: fileBaselineLevel, // <-- Add this line
+    maxSize: "20m",
+    maxFiles: "14d",
+    format: winston.format.uncolorize(),
+    utc: true,
   }),
 ];
 
@@ -109,8 +134,9 @@ if (isStorageWritable) {
   );
 }
 // Create logger instance
+// Create logger instance
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
+  level: globalGatekeeperLevel, // <-- Change this line
   levels,
   format: baseFileFormat,
   transports: activeTransports, 
