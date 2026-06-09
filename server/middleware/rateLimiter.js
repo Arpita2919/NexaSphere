@@ -1,26 +1,26 @@
-import rateLimit from "express-rate-limit";
-import logger from "../utils/logger.js";
+import rateLimit from 'express-rate-limit';
+import logger from '../utils/logger.js';
+import rateLimit from 'express-rate-limit';
+import logger from '../utils/logger.js';
 
+const suspiciousIPs = new Map();
+
+function parsePositiveInt(value, fallback) {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 // ---------------------------------------------------------------------------
 // Shared env-var config for the general API limiter
 // Override via API_RATE_LIMIT_WINDOW_MS and API_RATE_LIMIT_MAX in .env
 // ---------------------------------------------------------------------------
-const API_WINDOW_MS = process.env.API_RATE_LIMIT_WINDOW_MS
-  ? parseInt(process.env.API_RATE_LIMIT_WINDOW_MS, 10)
-  : 10 * 60 * 1000; // 10 minutes
+const API_WINDOW_MS = parsePositiveInt(process.env.API_RATE_LIMIT_WINDOW_MS, 10 * 60 * 1000);
 
-const API_MAX_REQUESTS = process.env.API_RATE_LIMIT_MAX
-  ? parseInt(process.env.API_RATE_LIMIT_MAX, 10)
-  : 100;
+const API_MAX_REQUESTS = parsePositiveInt(process.env.API_RATE_LIMIT_MAX, 100);
 
 // Shared env-var config for the form limiter
-const FORM_WINDOW_MS = process.env.RATE_LIMIT_WINDOW_MS
-  ? parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10)
-  : 10 * 60 * 1000; // 10 minutes
+const FORM_WINDOW_MS = parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, 10 * 60 * 1000);
 
-const FORM_MAX_REQUESTS = process.env.RATE_LIMIT_MAX_REQUESTS
-  ? parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10)
-  : 5;
+const FORM_MAX_REQUESTS = parsePositiveInt(process.env.RATE_LIMIT_MAX_REQUESTS, 5);
 
 // ---------------------------------------------------------------------------
 // Global API rate limiter — applied to every /api route
@@ -30,11 +30,36 @@ const FORM_MAX_REQUESTS = process.env.RATE_LIMIT_MAX_REQUESTS
 // ---------------------------------------------------------------------------
 export const apiRateLimiter = rateLimit({
   windowMs: API_WINDOW_MS,
+  handler: (req, res, _next, options) => {
+  logger.warn('Global API rate limit exceeded', {
+    ip: req.ip,
+    path: req.originalUrl || req.path,
+    method: req.method,
+    limit: options.max,
+    windowMs: options.windowMs,
+  });
+
+  const currentCount = (suspiciousIPs.get(req.ip) || 0) + 1;
+  suspiciousIPs.set(req.ip, currentCount);
+
+  if (currentCount >= 5) {
+    logger.error('Suspicious activity detected', {
+      ip: req.ip,
+      attempts: currentCount,
+      path: req.originalUrl || req.path,
+      detectedAt: new Date().toISOString(),
+    });
+  }
+
+  res.status(options.statusCode).json({
+    error: 'Too many requests from this IP, please try again later.',
+  });
+},
   max: API_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res, _next, options) => {
-    logger.warn("Global API rate limit exceeded", {
+    logger.warn('Global API rate limit exceeded', {
       ip: req.ip,
       path: req.originalUrl || req.path,
       method: req.method,
@@ -42,7 +67,7 @@ export const apiRateLimiter = rateLimit({
       windowMs: options.windowMs,
     });
     res.status(options.statusCode).json({
-      error: "Too many requests from this IP, please try again later.",
+      error: 'Too many requests from this IP, please try again later.',
     });
   },
 });
@@ -56,7 +81,7 @@ export const formRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res, _next, options) => {
-    logger.warn("Rate limit exceeded for public form API", {
+    logger.warn('Rate limit exceeded for public form API', {
       ip: req.ip,
       path: req.originalUrl || req.path,
       method: req.method,
@@ -64,7 +89,7 @@ export const formRateLimiter = rateLimit({
       windowMs: options.windowMs,
     });
     res.status(options.statusCode).json({
-      error: "Too many form submissions from this IP, please try again later.",
+      error: 'Too many form submissions from this IP, please try again later.',
     });
   },
 });
@@ -76,7 +101,7 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: "Too many login attempts, please try again after a minute.",
+    error: 'Too many login attempts, please try again after a minute.',
   },
 });
 
@@ -87,7 +112,29 @@ export const notificationRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: "Too many notification requests, please try again later.",
+    error: 'Too many notification requests, please try again later.',
+  },
+});
+
+// Activity-event auth rate limiter: 10 requests per IP per 15 minutes.
+// Applied to the publicly reachable POST/DELETE activity-event endpoints that
+// require a shared password. Backs up the in-process lockout so that even
+// when the server restarts the IP-level window survives in the rate-limit
+// store.
+export const activityAuthRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    logger.warn('Activity-event auth rate limit exceeded', {
+      ip: req.ip,
+      path: req.originalUrl || req.path,
+      method: req.method,
+    });
+    res.status(options.statusCode).json({
+      error: 'Too many attempts from this IP, please try again later.',
+    });
   },
 });
 
@@ -98,8 +145,7 @@ export const portfolioRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error:
-      "Too many portfolio update attempts from this IP, please try again after 15 minutes.",
+    error: 'Too many portfolio update attempts from this IP, please try again after 15 minutes.',
   },
 });
 
@@ -114,11 +160,12 @@ export function validateLimiters() {
     formRateLimiter,
     authRateLimiter,
     notificationRateLimiter,
+    activityAuthRateLimiter,
     portfolioRateLimiter,
   };
 
   for (const [name, limiter] of Object.entries(limiters)) {
-    if (typeof limiter !== "function") {
+    if (typeof limiter !== 'function') {
       throw new Error(
         `Rate limiter misconfiguration: "${name}" is not a function. Check rateLimiter.js exports.`
       );

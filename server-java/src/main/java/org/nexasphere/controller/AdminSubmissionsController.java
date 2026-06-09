@@ -5,9 +5,9 @@ import org.nexasphere.model.entity.RecruitmentSubmissionEntity;
 import org.nexasphere.repository.MembershipSubmissionRepository;
 import org.nexasphere.repository.RecruitmentSubmissionRepository;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.NonNull;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -17,7 +17,7 @@ public class AdminSubmissionsController {
     private final MembershipSubmissionRepository membershipRepo;
     private final RecruitmentSubmissionRepository recruitmentRepo;
 
-    public AdminSubmissionsController(MembershipSubmissionRepository membershipRepo, 
+    public AdminSubmissionsController(MembershipSubmissionRepository membershipRepo,
                                       RecruitmentSubmissionRepository recruitmentRepo) {
         this.membershipRepo = membershipRepo;
         this.recruitmentRepo = recruitmentRepo;
@@ -35,19 +35,25 @@ public class AdminSubmissionsController {
 
     @PatchMapping("/membership/{id}/status")
     public ResponseEntity<MembershipSubmissionEntity> updateMembershipStatus(
-            @PathVariable Long id, @RequestBody Map<String, String> body) {
-        return membershipRepo.findById(id).map(s -> {
-            s.setStatus(body.get("status"));
-            return ResponseEntity.ok(membershipRepo.save(s));
-        }).orElse(ResponseEntity.notFound().build());
+            @PathVariable @NonNull Long id, @RequestBody Map<String, String> body) {
+        return membershipRepo.findById(id)
+                .map(s -> {
+                    s.setStatus(body.get("status"));
+                    MembershipSubmissionEntity saved = membershipRepo.save(s);
+                    return ResponseEntity.ok(saved);
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PatchMapping("/recruitment/{id}/status")
     public ResponseEntity<RecruitmentSubmissionEntity> updateRecruitmentStatus(
-            @PathVariable Long id, @RequestBody Map<String, String> body) {
-        return recruitmentRepo.findById(id).map(s -> {
-            s.setStatus(body.get("status"));
-            return ResponseEntity.ok(recruitmentRepo.save(s));
-        }).orElse(ResponseEntity.notFound().build());
+            @PathVariable @NonNull Long id, @RequestBody Map<String, String> body) {
+        return recruitmentRepo.findById(id)
+                .map(s -> {
+                    s.setStatus(body.get("status"));
+                    RecruitmentSubmissionEntity saved = recruitmentRepo.save(s);
+                    return ResponseEntity.ok(saved);
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

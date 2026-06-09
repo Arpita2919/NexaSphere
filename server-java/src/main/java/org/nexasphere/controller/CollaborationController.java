@@ -1,17 +1,20 @@
 package org.nexasphere.controller;
 
+import jakarta.validation.Valid;
 import org.nexasphere.model.entity.CollaborationTeamEntity;
 import org.nexasphere.model.entity.JoinRequestEntity;
 import org.nexasphere.service.crud.CollaborationService;
+import org.owasp.encoder.Encode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.NonNull;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/collab")
-@CrossOrigin(origins = "*") // Adjust based on security configuration
+@CrossOrigin(origins = "*")
 public class CollaborationController {
 
     @Autowired
@@ -23,18 +26,41 @@ public class CollaborationController {
     }
 
     @PostMapping("/teams")
-    public ResponseEntity<CollaborationTeamEntity> createTeam(@RequestBody CollaborationTeamEntity team) {
+    public ResponseEntity<CollaborationTeamEntity> createTeam(
+            @Valid @RequestBody @NonNull CollaborationTeamEntity team) {
+
+        // Sanitize user input fields
+        if (team.getName() != null) {
+            team.setName(Encode.forHtml(team.getName()));
+        }
+
+        if (team.getDescription() != null) {
+            team.setDescription(Encode.forHtml(team.getDescription()));
+        }
+
         return ResponseEntity.ok(collaborationService.createTeam(team));
     }
 
     @PostMapping("/requests")
-    public ResponseEntity<JoinRequestEntity> submitJoinRequest(@RequestBody JoinRequestEntity request) {
+    public ResponseEntity<JoinRequestEntity> submitJoinRequest(
+            @Valid @RequestBody @NonNull JoinRequestEntity request) {
+
+        // Sanitize user input fields
+        if (request.getPitch() != null) {
+            request.setPitch(Encode.forHtml(request.getPitch()));
+        }
+
         return ResponseEntity.ok(collaborationService.submitJoinRequest(request));
     }
 
     @PatchMapping("/requests/{id}/status")
-    public ResponseEntity<JoinRequestEntity> updateRequestStatus(@PathVariable Long id, @RequestParam String status) {
-        return collaborationService.updateRequestStatus(id, status)
+    public ResponseEntity<JoinRequestEntity> updateRequestStatus(
+            @PathVariable @NonNull Long id,
+            @RequestParam String status) {
+
+        String safeStatus = Encode.forHtml(status);
+
+        return collaborationService.updateRequestStatus(id, safeStatus)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

@@ -1,21 +1,25 @@
-import bcrypt from "bcryptjs";
-import { promises as fs } from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { withDb } from "./db.js";
-import { Mutex } from "async-mutex";
+import bcrypt from 'bcryptjs';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { withDb } from './db.js';
+import { Mutex } from 'async-mutex';
+import { sanitizePortfolioRecord, sanitizePortfolioOutput } from '../utils/sanitize.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PORTFOLIOS_FILE = path.join(__dirname, "..", "data", "portfolios.json");
+const PORTFOLIOS_FILE = path.join(__dirname, '..', 'data', 'portfolios.json');
 const portfolioMutex = new Mutex();
 
 const BCRYPT_ROUNDS = 12;
 
 let schemaReady = null;
+let schemaOk = false;
+let lastDbFailTime = 0;
+const DB_RETRY_TTL = 15000;
 
 export function canonicalizeUsername(username) {
-  return String(username || "")
+  return String(username || '')
     .trim()
     .toLowerCase();
 }
@@ -44,6 +48,9 @@ async function ensureSchema(client) {
       roadmaps JSONB DEFAULT '[]'::jsonb,
       bio TEXT,
       title TEXT,
+      avatar_url VARCHAR(2048) DEFAULT '',
+      education JSONB DEFAULT '[]'::jsonb,
+      work_experience JSONB DEFAULT '[]'::jsonb,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -102,23 +109,41 @@ async function ensureSchema(client) {
 }
 
 async function ensureReady() {
-  if (schemaReady) return schemaReady;
+  if (schemaOk) return true;
 
-  // Check if we can connect to PostgreSQL
-  try {
-    schemaReady = withDb(async (client) => {
-      await ensureSchema(client);
+  if (schemaReady) {
+    try {
+      await schemaReady;
       return true;
-    });
-    await schemaReady;
-  } catch (err) {
-    console.warn(
-      "PostgreSQL is not configured or not available. Falling back to local file storage for portfolios.",
-      err.message
-    );
-    schemaReady = Promise.resolve(false);
+    } catch {
+      return false;
+    }
   }
-  return schemaReady;
+
+  const now = Date.now();
+  if (now - lastDbFailTime < DB_RETRY_TTL) {
+    return false;
+  }
+
+  schemaReady = withDb(async (client) => {
+    await ensureSchema(client);
+  })
+    .then(() => {
+      schemaOk = true;
+    })
+    .catch((err) => {
+      schemaReady = null;
+      lastDbFailTime = Date.now();
+      throw err;
+    });
+
+  try {
+    await schemaReady;
+    return true;
+  } catch (err) {
+    console.warn('PostgreSQL not available:', err.message);
+    return false;
+  }
 }
 
 // Local File Store Helpers
@@ -128,60 +153,53 @@ async function ensureLocalFile() {
   try {
     await fs.access(PORTFOLIOS_FILE);
   } catch {
-    await fs.writeFile(PORTFOLIOS_FILE, JSON.stringify({}, null, 2), "utf8");
+    await fs.writeFile(PORTFOLIOS_FILE, JSON.stringify({}, null, 2), 'utf8');
   }
 }
 
 async function readLocalPortfolios() {
   await ensureLocalFile();
-  const raw = await fs.readFile(PORTFOLIOS_FILE, "utf8");
+  const raw = await fs.readFile(PORTFOLIOS_FILE, 'utf8');
   return JSON.parse(raw);
 }
 
 async function writeLocalPortfolios(data) {
   await ensureLocalFile();
-  await fs.writeFile(PORTFOLIOS_FILE, JSON.stringify(data, null, 2), "utf8");
+  await fs.writeFile(PORTFOLIOS_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
 function mapRow(row) {
   if (!row) return null;
-  return {
+  const raw = {
     username: row.username,
     theme: row.theme,
     visibleSections:
-      typeof row.visible_sections === "string"
+      typeof row.visible_sections === 'string'
         ? JSON.parse(row.visible_sections)
         : row.visible_sections || {},
     socialLinks:
-      typeof row.social_links === "string"
-        ? JSON.parse(row.social_links)
-        : row.social_links || {},
-    customDomain: row.custom_domain || "",
+      typeof row.social_links === 'string' ? JSON.parse(row.social_links) : row.social_links || {},
+    customDomain: row.custom_domain || '',
     seoMetadata:
-      typeof row.seo_metadata === "string"
-        ? JSON.parse(row.seo_metadata)
-        : row.seo_metadata || {},
-    skills:
-      typeof row.skills === "string"
-        ? JSON.parse(row.skills)
-        : row.skills || [],
-    badges:
-      typeof row.badges === "string"
-        ? JSON.parse(row.badges)
-        : row.badges || [],
-    projects:
-      typeof row.projects === "string"
-        ? JSON.parse(row.projects)
-        : row.projects || [],
-    roadmaps:
-      typeof row.roadmaps === "string"
-        ? JSON.parse(row.roadmaps)
-        : row.roadmaps || [],
-    bio: row.bio || "",
-    title: row.title || "",
+      typeof row.seo_metadata === 'string' ? JSON.parse(row.seo_metadata) : row.seo_metadata || {},
+    skills: typeof row.skills === 'string' ? JSON.parse(row.skills) : row.skills || [],
+    badges: typeof row.badges === 'string' ? JSON.parse(row.badges) : row.badges || [],
+    projects: typeof row.projects === 'string' ? JSON.parse(row.projects) : row.projects || [],
+    roadmaps: typeof row.roadmaps === 'string' ? JSON.parse(row.roadmaps) : row.roadmaps || [],
+    bio: row.bio || '',
+    title: row.title || '',
+    avatarUrl: row.avatar_url || '',
+    education: typeof row.education === 'string' ? JSON.parse(row.education) : row.education || [],
+    workExperience:
+      typeof row.work_experience === 'string'
+        ? JSON.parse(row.work_experience)
+        : row.work_experience || [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  // Defense-in-depth: sanitize on read so that content written by
+  // older code (or any future bypass) cannot reach the client.
+  return sanitizePortfolioOutput(raw);
 }
 
 export const portfolioRepository = {
@@ -192,18 +210,14 @@ export const portfolioRepository = {
     if (isDbAvailable) {
       try {
         return await withDb(async (client) => {
-          const { rows } = await client.query(
-            "SELECT * FROM portfolios WHERE username = $1",
-            [sanitizedUsername]
-          );
+          const { rows } = await client.query('SELECT * FROM portfolios WHERE username = $1', [
+            sanitizedUsername,
+          ]);
           if (!rows.length) return null;
           return mapRow(rows[0]);
         });
       } catch (err) {
-        console.error(
-          "Database query failed. Falling back to local file.",
-          err
-        );
+        console.error('Database query failed. Falling back to local file.', err);
       }
     }
 
@@ -211,25 +225,39 @@ export const portfolioRepository = {
     const portfolios = await readLocalPortfolios();
     const portfolio = portfolios[sanitizedUsername];
     if (!portfolio) return null;
-    return {
+    return sanitizePortfolioOutput({
       username: portfolio.username,
       theme: portfolio.theme,
       visibleSections: portfolio.visibleSections || {},
       socialLinks: portfolio.socialLinks || {},
-      customDomain: portfolio.customDomain || "",
+      customDomain: portfolio.customDomain || '',
       seoMetadata: portfolio.seoMetadata || {},
       skills: portfolio.skills || [],
       badges: portfolio.badges || [],
       projects: portfolio.projects || [],
       roadmaps: portfolio.roadmaps || [],
-      bio: portfolio.bio || "",
-      title: portfolio.title || "",
+      bio: portfolio.bio || '',
+      title: portfolio.title || '',
+      avatarUrl: portfolio.avatarUrl || '',
+      education: portfolio.education || [],
+      workExperience: portfolio.workExperience || [],
       createdAt: portfolio.createdAt,
       updatedAt: portfolio.updatedAt,
-    };
+    });
   },
 
-  async verifyPasskey(username, passkey) {
+  /**
+   * Verify that the provided passkey is correct for the given username.
+   *
+   * @param {string} username
+   * @param {string} passkey
+   * @param {object} [options]
+   * @param {boolean} [options.allowNew=false] - When true, a non-existent username
+   *   is treated as a new registration and the passkey is accepted unconditionally.
+   *   When false (default), a non-existent username returns false so that callers
+   *   cannot bypass authentication by supplying an unrecognised username.
+   */
+  async verifyPasskey(username, passkey, { allowNew = false } = {}) {
     const isDbAvailable = await ensureReady();
     const sanitizedUsername = canonicalizeUsername(username);
 
@@ -237,48 +265,60 @@ export const portfolioRepository = {
       try {
         return await withDb(async (client) => {
           const { rows } = await client.query(
-            "SELECT passkey_hash FROM portfolios WHERE username = $1",
+            'SELECT passkey_hash FROM portfolios WHERE username = $1',
             [sanitizedUsername]
           );
-          if (!rows.length) return true; // Username does not exist, so it's a new registration (allow it)
+          if (!rows.length) {
+            // Username does not exist yet.
+            // Only allow if the caller has explicitly declared this is a new registration.
+            // Returning true unconditionally here was the authentication bypass vector.
+            return allowNew;
+          }
           return await verifyHash(passkey, rows[0].passkey_hash);
         });
       } catch (err) {
-        console.error(
-          "Database query failed in verifyPasskey. Falling back to local file.",
-          err
-        );
+        console.error('Database query failed in verifyPasskey. Falling back to local file.', err);
       }
     }
 
-    // Local file fallback
+    // Local file fallback (read-only cache — fail closed when user is unknown)
     const portfolios = await readLocalPortfolios();
     const portfolio = portfolios[sanitizedUsername];
-    if (!portfolio) return true; // New registration
+    if (!portfolio) {
+      // Same guard as the DB path — only allow if explicitly a new registration.
+      return allowNew;
+    }
     return await verifyHash(passkey, portfolio.passkeyHash);
   },
 
-  async createOrUpdate(data) {
+  async createOrUpdate(data, isNewRegistration) {
     const isDbAvailable = await ensureReady();
-    const sanitizedUsername = canonicalizeUsername(data.username);
-    const passkeyHash = await hashPasskey(data.passkey);
 
-    const theme = data.theme || "glassmorphic";
-    const visibleSections = data.visibleSections || {
-      quests: true,
-      roadmaps: true,
-      projects: true,
-      analytics: false,
-    };
-    const socialLinks = data.socialLinks || {};
-    const customDomain = data.customDomain || "";
-    const seoMetadata = data.seoMetadata || {};
-    const skills = data.skills || [];
-    const badges = data.badges || [];
-    const projects = data.projects || [];
-    const roadmaps = data.roadmaps || [];
-    const bio = data.bio || "";
-    const title = data.title || "";
+    // Sanitize the entire record before any I/O so the database
+    // never holds raw HTML, javascript: URLs, or oversized strings.
+    // The Zod schema in the route handler catches the same
+    // problems earlier, but the repository is the last line of
+    // defense and is callable from other code paths (background
+    // jobs, seeders, tests).
+    const clean = sanitizePortfolioRecord(data);
+
+    const sanitizedUsername = clean.username || canonicalizeUsername(data.username);
+    const passkeyHash = await hashPasskey(clean.passkey || data.passkey);
+
+    const theme = clean.theme || 'glassmorphic';
+    const visibleSections = clean.visibleSections;
+    const socialLinks = clean.socialLinks;
+    const customDomain = clean.customDomain || '';
+    const seoMetadata = clean.seoMetadata;
+    const skills = clean.skills;
+    const badges = clean.badges;
+    const projects = clean.projects;
+    const roadmaps = clean.roadmaps;
+    const bio = clean.bio;
+    const title = clean.title;
+    const avatarUrl = clean.avatarUrl || '';
+    const education = clean.education || [];
+    const workExperience = clean.workExperience || [];
 
     if (isDbAvailable) {
       try {
@@ -286,8 +326,8 @@ export const portfolioRepository = {
           const { rows } = await client.query(
             `INSERT INTO portfolios (
               username, passkey_hash, theme, visible_sections, social_links,
-              custom_domain, seo_metadata, skills, badges, projects, roadmaps, bio, title, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+              custom_domain, seo_metadata, skills, badges, projects, roadmaps, bio, title, avatar_url, education, work_experience, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
             ON CONFLICT (username) DO UPDATE SET
               passkey_hash = EXCLUDED.passkey_hash,
               theme = EXCLUDED.theme,
@@ -301,6 +341,9 @@ export const portfolioRepository = {
               roadmaps = EXCLUDED.roadmaps,
               bio = EXCLUDED.bio,
               title = EXCLUDED.title,
+              avatar_url = EXCLUDED.avatar_url,
+              education = EXCLUDED.education,
+              work_experience = EXCLUDED.work_experience,
               updated_at = NOW()
             RETURNING *`,
             [
@@ -317,15 +360,18 @@ export const portfolioRepository = {
               JSON.stringify(roadmaps),
               bio,
               title,
+              avatarUrl,
+              JSON.stringify(education),
+              JSON.stringify(workExperience),
             ]
           );
           return mapRow(rows[0]);
         });
       } catch (err) {
-        console.error(
-          "Database INSERT/UPDATE failed. Falling back to local file.",
-          err
-        );
+        if (err.code === '23505') {
+          throw err; // Bubble up unique constraint violation
+        }
+        console.error('Database INSERT/UPDATE failed. Falling back to local file.', err);
       }
     }
 
@@ -349,32 +395,52 @@ export const portfolioRepository = {
         roadmaps,
         bio,
         title,
+        avatarUrl,
+        education,
+        workExperience,
         createdAt: existing.createdAt,
         updatedAt: now,
       };
       portfolios[sanitizedUsername] = updatedPortfolio;
       await writeLocalPortfolios(portfolios);
 
-      return {
-        username: updatedPortfolio.username,
-        theme: updatedPortfolio.theme,
-        visibleSections: updatedPortfolio.visibleSections,
-        socialLinks: updatedPortfolio.socialLinks,
-        customDomain: updatedPortfolio.customDomain,
-        seoMetadata: updatedPortfolio.seoMetadata,
-        skills: updatedPortfolio.skills,
-        badges: updatedPortfolio.badges,
-        projects: updatedPortfolio.projects,
-        roadmaps: updatedPortfolio.roadmaps,
-        bio: updatedPortfolio.bio,
-        title: updatedPortfolio.title,
-        createdAt: updatedPortfolio.createdAt,
-        updatedAt: updatedPortfolio.updatedAt,
-      };
+      return sanitizePortfolioOutput(updatedPortfolio);
     });
+  },
+
+  async listAll() {
+    const isDbAvailable = await ensureReady();
+    if (isDbAvailable) {
+      try {
+        return await withDb(async (client) => {
+          const { rows } = await client.query('SELECT * FROM portfolios ORDER BY updated_at DESC');
+          return rows.map(mapRow);
+        });
+      } catch (err) {
+        console.error('Failed to list portfolios:', err);
+      }
+    }
+    return [];
+  },
+
+  async delete(username) {
+    const isDbAvailable = await ensureReady();
+    if (isDbAvailable) {
+      return withDb(async (client) => {
+        await client.query('DELETE FROM portfolios WHERE username = $1', [username]);
+      });
+    }
+    throw new Error('Portfolio storage is unavailable');
   },
 };
 
+function resetState() {
+  schemaReady = null;
+  schemaOk = false;
+  lastDbFailTime = 0;
+}
+
 export const __portfolioRepositoryInternals = {
   ensureSchema,
+  resetState,
 };

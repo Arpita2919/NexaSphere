@@ -1,22 +1,74 @@
-## What does this PR do?
+# Summary
 
-This PR introduces a standard GitHub Pull Request Template to guide incoming contributions.
+## Related Issue
+Fixes #[ISSUE_NUMBER]
 
-## Why is this change needed?
+## Type of Change
+- [ ] Feature
+- [ ] Bug Fix
+- [ ] UI/UX Improvement
+- [ ] Performance Optimization
+- [ ] Security Enhancement
+- [ ] Refactoring
+- [ ] Documentation
+- [ ] Testing
+- [ ] Infrastructure
+- [ ] Integration
 
-Currently, there is no pull request template in place, which makes it harder to ensure all PR submissions follow the repository's guidelines, checklists, and documentation standards.
+## Changes Implemented
 
-## What changes were made?
+## Technical Details
 
-* Created a structured `.github/pull_request_template.md` containing description prompts, checklists, and verify instructions.
+### Frontend
 
-## How to test
+### Backend
 
-1. Open a new pull request against this repository.
-2. Confirm the PR template is pre-populated in the description box automatically.
+### Database
+
+### API
+
+### Infrastructure
+
+## Screenshots
+
+### Before
+
+### After
+
+## Testing
+
+### Unit Tests
+- [ ]
+
+### Integration Tests
+- [ ]
+
+### E2E Tests
+- [ ]
+
+### Manual Testing
+- [ ]
+
+## Security Review
+
+## Accessibility Review
+
+## Performance Impact
+
+## Breaking Changes
+- [ ] No Breaking Changes
+- [ ] Breaking Changes Documented
+
+## Deployment Notes
+
+## Rollback Plan
 
 ## Checklist
-
-* [x] Code follows project style
-* [x] Tested locally
-* [x] No breaking changes
+- [ ] Code follows project standards
+- [ ] Tests added or updated
+- [ ] Documentation updated
+- [ ] Security reviewed
+- [ ] Accessibility reviewed
+- [ ] Performance validated
+- [ ] CI/CD passing
+- [ ] Ready for review
