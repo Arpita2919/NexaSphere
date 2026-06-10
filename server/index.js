@@ -41,7 +41,18 @@ import * as formsController from './controllers/formsController.js';
 import { eventsService } from './services/eventsService.js';
 import { coreTeamService } from './services/coreTeamService.js';
 import notificationsService from './services/notificationsService.js';
+import { notificationPreferencesRepository } from './repositories/notificationPreferencesRepository.js';
 import { supabaseRequest, HAS_SUPABASE } from './storage/supabaseClient.js';
+import cookieParser from 'cookie-parser';
+import passport from './config/studentOAuth.js';
+import { studentUsersRepository } from './repositories/studentUsersRepository.js';
+import * as studentAuthController from './controllers/studentAuthController.js';
+import * as forumController from './controllers/forumController.js';
+import { requireStudentAuth } from './middleware/studentAuthMiddleware.js';
+import { xssSanitizer } from './middleware/xssSanitizer.js';
+import { tierRateLimiter } from './middleware/tierRateLimiter.js';
+import compression from 'compression';
+import syncRouter from './routes/sync.js';
 
 validateLimiters();
 
@@ -66,6 +77,7 @@ app.set(
 );
 
 initializeSentry(app);
+app.use(compression());
 
 if (!process.env.CORS_ORIGIN) {
   throw new Error('CORS_ORIGIN environment variable must be set.');
@@ -75,16 +87,14 @@ const allowedOrigins = process.env.CORS_ORIGIN.split(',')
   .map((s) => s.trim())
   .filter(Boolean);
 
-```js id="kpxvgr"
 app.use(
   helmet({
-
     // Prevent MIME sniffing
     noSniff: true,
 
     // Prevent clickjacking
     frameguard: {
-      action: "deny",
+      action: 'deny',
     },
 
     // Hide X-Powered-By
@@ -95,60 +105,41 @@ app.use(
 
     // Restrict referrer leakage
     referrerPolicy: {
-      policy: "strict-origin-when-cross-origin",
+      policy: 'strict-origin-when-cross-origin',
     },
 
     // Enforce HTTPS in production
-    hsts: env.NODE_ENV === "production"
-      ? {
-          maxAge: 31536000,
-          includeSubDomains: true,
-          preload: true,
-        }
-      : false,
+    hsts:
+      process.env.NODE_ENV === 'production'
+        ? {
+            maxAge: 31536000,
+            includeSubDomains: true,
+            preload: true,
+          }
+        : false,
 
     // Strict Content Security Policy
     contentSecurityPolicy: {
-
       useDefaults: false,
 
       directives: {
-
         // Default restriction
         defaultSrc: ["'self'"],
 
         // Prevent inline scripts + third-party execution
-        scriptSrc: [
-          "'self'",
-        ],
+        scriptSrc: ["'self'"],
 
         // Allow styles from self only
-        styleSrc: [
-          "'self'",
-          "'unsafe-inline'",
-        ],
+        styleSrc: ["'self'", "'unsafe-inline'"],
 
         // Images
-        imgSrc: [
-          "'self'",
-          "data:",
-          "blob:",
-          "https:",
-        ],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
 
         // Fonts
-        fontSrc: [
-          "'self'",
-          "https:",
-          "data:",
-        ],
+        fontSrc: ["'self'", 'https:', 'data:'],
 
         // API/WebSocket connections
-        connectSrc: [
-          "'self'",
-          "https:",
-          "wss:",
-        ],
+        connectSrc: ["'self'", 'https:', 'wss:'],
 
         // Block Flash/object/embed
         objectSrc: ["'none'"],
@@ -166,10 +157,7 @@ app.use(
         upgradeInsecureRequests: [],
 
         // Restrict workers
-        workerSrc: [
-          "'self'",
-          "blob:",
-        ],
+        workerSrc: ["'self'", 'blob:'],
 
         // Restrict manifests
         manifestSrc: ["'self'"],
@@ -189,11 +177,11 @@ app.use(
     crossOriginEmbedderPolicy: false,
 
     crossOriginOpenerPolicy: {
-      policy: "same-origin",
+      policy: 'same-origin',
     },
 
     crossOriginResourcePolicy: {
-      policy: "same-origin",
+      policy: 'same-origin',
     },
 
     // Disable DNS prefetching
@@ -215,8 +203,6 @@ app.use(
     },
   })
 );
-```
-
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -253,21 +239,37 @@ app.use(
         objectSrc: ["'none'"],
         upgradeInsecureRequests: [],
       },
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('CORS Policy: Origin not allowed.'));
     },
-    crossOriginEmbedderPolicy: false,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+    maxAge: 86400, // Cache preflight requests for 24 hours
   })
 );
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.options('*', cors());
 
 app.use(tracingMiddleware);
 
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(xssSanitizer);
 app.use(morgan('combined'));
 app.use(performanceMonitor);
+app.use(cookieParser());
 
 // Global API rate limiter — protects all /api routes from request flooding
-app.use('/api', apiRateLimiter);
+app.use('/api', tierRateLimiter());
 
 function requestLogger(req, res, next) {
   const start = process.hrtime.bigint();
@@ -305,6 +307,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/monitoring', monitoringRouter);
 app.use('/api', documentationRouter);
 app.use('/', apiRouter);
+app.use('/', syncRouter);
 
 const adminAuth = adminAuthMiddleware.requireAdmin;
 
@@ -398,6 +401,14 @@ app.post('/api/admin/logout', adminAuth, adminAuthMiddleware.logout);
 app.use('/api/admin/analytics', adminAuth, analyticsRouter);
 app.use('/api/admin/metrics', adminAuth, adminStreamRouter);
 
+// OAuth / SSO Student Auth Endpoints
+app.get('/api/auth/google', studentAuthController.googleAuth);
+app.get('/api/auth/google/callback', studentAuthController.googleCallback);
+app.get('/api/auth/github', studentAuthController.githubAuth);
+app.get('/api/auth/github/callback', studentAuthController.githubCallback);
+app.get('/api/auth/me', requireStudentAuth, studentAuthController.getMe);
+app.post('/api/auth/logout', studentAuthController.logout);
+
 // Event Admin Management
 app.get('/api/admin/events', adminAuth, eventsController.adminListEvents);
 app.post('/api/admin/events', adminAuth, eventsController.adminCreateEvent);
@@ -426,9 +437,10 @@ app.get('/api/content/team', async (req, res) => {
 });
 
 // Admin Team Management
-app.get('/api/admin/core-team', adminAuth, coreTeamController.adminListCoreTeamMembers);
-app.post('/api/admin/core-team', adminAuth, coreTeamController.adminAddCoreTeamMember);
-app.delete('/api/admin/core-team/:id', adminAuth, coreTeamController.adminDeleteCoreTeamMember);
+app.get('/api/admin/core-team', adminAuthMiddleware.requireScope('settings:admin'), coreTeamController.adminListCoreTeamMembers);
+app.post('/api/admin/core-team', adminAuthMiddleware.requireScope('settings:admin'), coreTeamController.adminAddCoreTeamMember);
+app.put('/api/admin/core-team/:id', adminAuthMiddleware.requireScope('settings:admin'), coreTeamController.adminUpdateCoreTeamMember);
+app.delete('/api/admin/core-team/:id', adminAuthMiddleware.requireScope('settings:admin'), coreTeamController.adminDeleteCoreTeamMember);
 
 // Dynamic forms
 app.post('/api/forms/membership', formRateLimiter, formsController.makeHandleForm('membership'));
@@ -555,35 +567,47 @@ const validatePushSubscription = [
   },
 ];
 
-app.post('/api/notifications/subscribe', validatePushSubscription, async (req, res) => {
-  try {
-    const { subscription } = req.body;
-    if (subscription) {
-      pushSubscriptions.add(JSON.stringify(subscription));
-      if (pushSubscriptions.size > 10000) {
-        const oldest = pushSubscriptions.values().next().value;
-        pushSubscriptions.delete(oldest);
+app.post(
+  '/api/notifications/subscribe',
+  adminAuth,
+  notificationRateLimiter,
+  validatePushSubscription,
+  async (req, res) => {
+    try {
+      const { subscription } = req.body;
+      if (subscription) {
+        pushSubscriptions.add(JSON.stringify(subscription));
+        if (pushSubscriptions.size > 10000) {
+          const oldest = pushSubscriptions.values().next().value;
+          pushSubscriptions.delete(oldest);
+        }
+        await persistPushSubscription(subscription);
       }
-      await persistPushSubscription(subscription);
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
-    return res.json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
   }
-});
+);
 
-app.post('/api/notifications/unsubscribe', validatePushSubscription, async (req, res) => {
-  try {
-    const { subscription } = req.body;
-    if (subscription) {
-      pushSubscriptions.delete(JSON.stringify(subscription));
-      await removePersistedPushSubscription(subscription);
+app.post(
+  '/api/notifications/unsubscribe',
+  adminAuth,
+  notificationRateLimiter,
+  validatePushSubscription,
+  async (req, res) => {
+    try {
+      const { subscription } = req.body;
+      if (subscription) {
+        pushSubscriptions.delete(JSON.stringify(subscription));
+        await removePersistedPushSubscription(subscription);
+      }
+      return res.json({ success: true });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
-    return res.json({ success: true });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
   }
-});
+);
 
 app.post('/api/notifications/mark-read', adminAuth, notificationRateLimiter, async (req, res) => {
   try {
@@ -776,8 +800,51 @@ function clearPasskeyAttempts(username, ip) {
 app.get('/api/notifications', async (req, res) => {
   try {
     const userId = req.query.userId || 'global';
-    const list = await notificationsService.getNotifications(userId);
+    const offset = parseInt(req.query.offset, 10) || 0;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const list = await notificationsService.getNotifications(userId, offset, limit);
     return res.json({ notifications: list });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Notification Preferences
+app.get('/api/notifications/preferences', async (req, res) => {
+  try {
+    const userId = req.query.userId || 'global';
+    const prefs = await notificationPreferencesRepository.list(userId);
+    return res.json({ preferences: prefs });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/notifications/preferences', async (req, res) => {
+  try {
+    const userId = req.body.userId || 'global';
+    const { category, email, push, in_app } = req.body;
+    if (!category) return res.status(400).json({ error: 'category is required' });
+    const pref = await notificationPreferencesRepository.set(userId, category, {
+      email,
+      push,
+      in_app,
+    });
+    return res.json({ preference: pref });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/notifications/preferences/bulk', async (req, res) => {
+  try {
+    const userId = req.body.userId || 'global';
+    const { preferences } = req.body;
+    if (!Array.isArray(preferences) || !preferences.length) {
+      return res.status(400).json({ error: 'preferences array is required' });
+    }
+    const results = await notificationPreferencesRepository.setBulk(userId, preferences);
+    return res.json({ preferences: results });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -850,6 +917,24 @@ app.put('/api/portfolio', protectedActionRateLimiter, async (req, res) => {
   }
 });
 
+// ── Forum / Q&A ──
+app.get('/api/forum/categories', forumController.listCategories);
+app.get('/api/forum/threads', forumController.listThreads);
+app.get('/api/forum/threads/:id', forumController.getThread);
+app.post('/api/forum/threads', forumController.createThread);
+app.put('/api/forum/threads/:id', forumController.updateThread);
+app.delete('/api/forum/threads/:id', forumController.deleteThread);
+app.get('/api/forum/threads/:id/replies', forumController.listReplies);
+app.post('/api/forum/threads/:id/replies', forumController.createReply);
+app.put('/api/forum/replies/:replyId', forumController.updateReply);
+app.delete('/api/forum/replies/:replyId', forumController.deleteReply);
+app.post('/api/forum/threads/:id/vote', forumController.voteThread);
+app.post('/api/forum/replies/:replyId/vote', forumController.voteReply);
+app.post('/api/forum/threads/:id/accept/:replyId', forumController.acceptReply);
+app.patch('/api/admin/forum/threads/:id/moderate', adminAuth, forumController.moderateThread);
+app.patch('/api/admin/forum/replies/:replyId/moderate', adminAuth, forumController.moderateReply);
+app.get('/api/admin/forum/threads', adminAuth, forumController.adminListThreads);
+
 // ── Search, Discovery & Recommendation Engine ──
 app.get('/api/search', searchController.search);
 app.get('/api/search/trending', searchController.trending);
@@ -878,15 +963,12 @@ let server;
 
 if (process.env.NODE_ENV !== 'test') {
   if (!process.env.VERCEL) {
-    const boot = HAS_SUPABASE ? Promise.resolve() : ensureContentFile();
-    boot
-      .then(() => loadPersistedPushSubscriptions())
-      .then(() => {
-        server = app.listen(port, () => {
-          console.log(`NexaSphere server listening on http://localhost:${port}`);
-        });
-        initializeSocketIO(server);
+    const boot = HAS_SUPABASE ? studentUsersRepository.ensureSchema() : ensureContentFile();
+    boot.then(() => {
+      server = app.listen(port, () => {
+        console.log(`NexaSphere server listening on http://localhost:${port}`);
       });
+    });
   } else {
     loadPersistedPushSubscriptions();
     server = app.listen(port, () => {
