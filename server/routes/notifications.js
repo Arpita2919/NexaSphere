@@ -125,22 +125,17 @@ router.post(
 /**
  * DELETE /api/notifications/:id — Remove a specific notification by ID.
  */
-router.delete(
-  '/api/notifications/:id',
-  adminAuth,
-  notificationRateLimiter,
-  async (req, res) => {
-    try {
-      const id = req.params.id;
-      const userId = req.query.userId || 'global';
-      const removed = await notificationsService.removeNotification(userId, id);
-      if (!removed) return res.status(404).json({ error: 'Notification not found' });
-      return res.json({ success: true });
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
+router.delete('/api/notifications/:id', adminAuth, notificationRateLimiter, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const userId = req.query.userId || 'global';
+    const removed = await notificationsService.removeNotification(userId, id);
+    if (!removed) return res.status(404).json({ error: 'Notification not found' });
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
-);
+});
 
 /**
  * DELETE /api/notifications — Clear all notifications for a user.

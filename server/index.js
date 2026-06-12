@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import { body, validationResult } from 'express-validator';
 import { EventEmitter } from 'events';
 import { google } from 'googleapis';
 import { promises as fs } from 'fs';
@@ -164,19 +165,35 @@ app.use(
         defaultSrc: ["'self'"],
 
         // Prevent inline scripts + third-party execution
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", 'https://challenges.cloudflare.com'],
 
         // Allow styles from self only
         styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
 
         // Images
-        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        imgSrc: [
+          "'self'",
+          'data:',
+          'blob:',
+          'https:',
+          'https://api.dicebear.com',
+          'https://images.unsplash.com',
+        ],
 
         // Fonts
-        fontSrc: ["'self'", 'https:', 'data:'],
+        fontSrc: ["'self'", 'https:', 'data:', 'https://fonts.gstatic.com'],
 
         // API/WebSocket connections
-        connectSrc: ["'self'", 'https:', 'wss:'],
+        connectSrc: [
+          "'self'",
+          'https:',
+          'wss:',
+          'https://challenges.cloudflare.com',
+          'https://*.ingest.sentry.io',
+          'https://*.ingest.us.sentry.io',
+          process.env.FRONTEND_URL || 'http://localhost:5173',
+          `wss://${process.env.DOMAIN || 'localhost'}`,
+        ],
 
         // Block Flash/object/embed
         objectSrc: ["'none'"],
@@ -203,7 +220,7 @@ app.use(
         mediaSrc: ["'self'"],
 
         // Restrict frames
-        frameSrc: ["'none'"],
+        frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://maps.google.com'],
 
         // Restrict child browsing contexts
         childSrc: ["'none'"],
@@ -240,42 +257,8 @@ app.use(
     },
   })
 );
+
 app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", 'https://challenges.cloudflare.com'],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
-        imgSrc: [
-          "'self'",
-          'data:',
-          'https:',
-          'https://api.dicebear.com',
-          'https://images.unsplash.com',
-        ],
-        connectSrc: [
-          "'self'",
-          'https://challenges.cloudflare.com',
-          'https://*.ingest.sentry.io',
-          'https://*.ingest.us.sentry.io',
-          process.env.FRONTEND_URL || 'http://localhost:5173',
-          `wss://${process.env.DOMAIN || 'localhost'}`,
-        ],
-        frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://maps.google.com'],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        imgSrc: ["'self'", 'data:', 'https:'],
-        connectSrc: [
-          "'self'",
-          process.env.FRONTEND_URL || 'http://localhost:5173',
-          `wss://${process.env.DOMAIN || 'localhost'}`,
-        ],
-        objectSrc: ["'none'"],
-        upgradeInsecureRequests: [],
-      },
   cors({
     origin: (origin, callback) => {
       if (!origin) {
@@ -291,7 +274,7 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     preflightContinue: false,
     optionsSuccessStatus: 204,
-    maxAge: 86400, // Cache preflight requests for 24 hours
+    maxAge: 86400,
   })
 );
 app.options('*', cors());

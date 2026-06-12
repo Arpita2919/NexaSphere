@@ -14,7 +14,6 @@ jobs:
       github.event.comment.user.login == 'Premshaw23' &&
       github.event.issue.pull_request == null
     runs-on: ubuntu-latest
-
     steps:
       - name: Check if already assigned
         id: check

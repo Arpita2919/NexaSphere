@@ -395,11 +395,7 @@ export default function EventsPage({ onBack, onEventClick, events = fallbackEven
                           </>
                         ) : ev.status === 'starting-soon' ? (
                           <>
-                            <DynamicIcon
-                              name="Clock"
-                              size={11}
-                              style={{ marginRight: '4px' }}
-                            />{' '}
+                            <DynamicIcon name="Clock" size={11} style={{ marginRight: '4px' }} />{' '}
                             Starting Soon
                           </>
                         ) : (

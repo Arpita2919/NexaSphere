@@ -54,9 +54,6 @@ const colors = {
 
 winston.addColors(colors);
 
-// Define base log layout template
-const logLayout = winston.format.printf((info) => {
-  const { timestamp, level, message, ...args } = info;
 const LOG_FORMAT = (process.env.LOG_FORMAT || 'text').toLowerCase();
 
 const correlationFormat = winston.format((info) => {
@@ -80,9 +77,6 @@ const logLayout = winston.format.printf((info) => {
   }`;
 });
 
-// Define clean log format for file transports
-const baseFileFormat = winston.format.combine(
-  winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
 const textFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
   winston.format.errors({ stack: true }),
@@ -93,40 +87,21 @@ const textFormat = winston.format.combine(
 
     // Strip out internal Winston symbol keys so they don't print as empty objects
     const cleanArgs = Object.keys(args).reduce((acc, key) => {
-      if (typeof key === "string" || typeof key === "number") {
+      if (typeof key === 'string' || typeof key === 'number') {
         acc[key] = args[key];
       }
       return acc;
     }, {});
 
-    // REMOVED 'null, 2' to keep metadata on a single unified line
     return `${ts} [${level}]: ${message} ${
-      Object.keys(args).length ? JSON.stringify(args) : ""
+      Object.keys(cleanArgs).length ? JSON.stringify(cleanArgs) : ''
     }`;
   })
 );
 
-// Determine runtime levels: Console is dynamic, historical files maintain info baseline
-const consoleLevel = process.env.LOG_LEVEL || 'info';
-const fileBaselineLevel = 'info';
-
-// Ensure the root gatekeeper allows debug logs through if requested, otherwise defaults to info
-const globalGatekeeperLevel = consoleLevel === 'debug' ? 'debug' : fileBaselineLevel;
-
-// Define activeTransports array, starting with the Console transport
-const activeTransports = [
-  // Console transport (Colorizes exclusively for terminal output)
-  new winston.transports.Console({
-    level: consoleLevel,
-    format: winston.format.combine(
-      winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
-      winston.format.errors({ stack: true }),
-      winston.format.colorize({ all: true }),
-      logLayout
-    ),
 const baseFileFormat = LOG_FORMAT === 'json' ? jsonFormat : textFormat;
 
-const consoleLevel = process.env.LOG_LEVEL_CONSOLE || 'info';
+const consoleLevel = process.env.LOG_LEVEL_CONSOLE || process.env.LOG_LEVEL || 'info';
 const fileBaselineLevel = process.env.LOG_LEVEL_FILE || 'info';
 const globalGatekeeperLevel = process.env.LOG_LEVEL_GLOBAL || 'debug';
 
