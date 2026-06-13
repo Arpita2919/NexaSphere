@@ -148,6 +148,24 @@ export const portfolioRateLimiter = rateLimit({
   },
 });
 
+export const eventRegistrationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: createRateLimitStore('rate-limit:event-reg:'),
+  handler: (req, res, _next, options) => {
+    logger.warn('Event registration rate limit exceeded', {
+      ip: req.ip,
+      path: req.originalUrl || req.path,
+      method: req.method,
+    });
+    res.status(options.statusCode).json({
+      error: 'Too many registration attempts. Please try again later.',
+    });
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Startup guard — call once during server boot to catch missing exports early.
 // Throws immediately if any limiter failed to initialise, preventing the silent
@@ -161,6 +179,7 @@ export function validateLimiters() {
     notificationRateLimiter,
     activityAuthRateLimiter,
     portfolioRateLimiter,
+    eventRegistrationLimiter,
   };
 
   for (const [name, limiter] of Object.entries(limiters)) {
