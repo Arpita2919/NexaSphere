@@ -11,6 +11,12 @@ import {
   rollbackConfig,
 } from '../utils/configApproval.js';
 import { apiRateLimiter } from '../middleware/rateLimiter.js';
+import {
+  runIntegrityCheck,
+  detectCorruption,
+  generateRecoveryRecommendation,
+  createRecoveryAuditLog,
+} from '../utils/dataIntegrityValidator.js';
 
 const router = Router();
 const adminAuth = [apiRateLimiter, adminAuthMiddleware.requireAdmin];
@@ -71,6 +77,22 @@ router.post('/api/admin/config-review', adminAuth, (req, res) => {
     history,
     rollback,
   });
+});
+
+router.get('/api/admin/database-health', adminAuth, (req, res) => {
+  res.json(runIntegrityCheck());
+});
+
+router.get('/api/admin/database-corruption', adminAuth, (req, res) => {
+  res.json(detectCorruption());
+});
+
+router.get('/api/admin/database-recovery', adminAuth, (req, res) => {
+  res.json(generateRecoveryRecommendation());
+});
+
+router.get('/api/admin/database-audit-log', adminAuth, (req, res) => {
+  res.json(createRecoveryAuditLog());
 });
 
 export default router;
