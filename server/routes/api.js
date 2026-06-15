@@ -14,6 +14,7 @@ import { authRateLimiter, protectedActionRateLimiter } from '../middleware/authR
 import { portfolioRepository } from '../repositories/portfolioRepository.js';
 import { achievementsRepository } from '../repositories/achievementsRepository.js';
 import { portfolioService } from '../services/portfolioService.js';
+import { skillExchangeService } from '../services/skillExchangeService.js';
 
 const router = Router();
 
@@ -41,9 +42,24 @@ router.delete(
 
 // Admin auth
 router.get('/api/admin/users', adminAuthMiddleware.requireAdmin, usersController.getAdminUsers);
-router.post('/api/admin/users', adminAuthMiddleware.requireAdmin, adminAuditMiddleware, usersController.adminCreateUser);
-router.put('/api/admin/users/:id', adminAuthMiddleware.requireAdmin, adminAuditMiddleware, usersController.adminUpdateUser);
-router.delete('/api/admin/users/:id', adminAuthMiddleware.requireAdmin, adminAuditMiddleware, usersController.adminDeactivateUser);
+router.post(
+  '/api/admin/users',
+  adminAuthMiddleware.requireAdmin,
+  adminAuditMiddleware,
+  usersController.adminCreateUser
+);
+router.put(
+  '/api/admin/users/:id',
+  adminAuthMiddleware.requireAdmin,
+  adminAuditMiddleware,
+  usersController.adminUpdateUser
+);
+router.delete(
+  '/api/admin/users/:id',
+  adminAuthMiddleware.requireAdmin,
+  adminAuditMiddleware,
+  usersController.adminDeactivateUser
+);
 router.post('/api/admin/login', authRateLimiter, adminAuthMiddleware.login);
 router.post('/api/admin/logout', adminAuthMiddleware.requireAdmin, adminAuthMiddleware.logout);
 
@@ -188,6 +204,56 @@ router.delete(
       return res.status(500).json({ error: err.message });
     }
   }
+);
+
+// Skill Exchange
+router.get('/api/content/skills/listings', (req, res) =>
+  res.json({ listings: skillExchangeService.getListings(req.query) })
+);
+router.post('/api/content/skills/listings', (req, res) =>
+  res.status(201).json(skillExchangeService.createListing(req.body))
+);
+router.get('/api/content/skills/matches/:listingId', (req, res) =>
+  res.json({ matches: skillExchangeService.findMatches(req.params.listingId) })
+);
+router.post('/api/content/skills/sessions', (req, res) =>
+  res
+    .status(201)
+    .json(
+      skillExchangeService.bookSession(
+        req.body.fromUser,
+        req.body.toUser,
+        req.body.listingId,
+        req.body.scheduledAt
+      )
+    )
+);
+router.put('/api/content/skills/sessions/:id', (req, res) => {
+  const session = skillExchangeService.completeSession(req.params.id, req.body.notes);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  res.json(session);
+});
+router.post('/api/content/skills/sessions/:id/feedback', (req, res) =>
+  res
+    .status(201)
+    .json(
+      skillExchangeService.leaveFeedback(
+        req.params.id,
+        req.body.from,
+        req.body.to,
+        req.body.rating,
+        req.body.comment
+      )
+    )
+);
+router.get('/api/content/skills/sessions/:id/feedback', (req, res) =>
+  res.json({ feedback: skillExchangeService.getFeedback(req.params.id) })
+);
+router.get('/api/content/skills/leaderboard', (req, res) =>
+  res.json({ leaderboard: skillExchangeService.getLeaderboard() })
+);
+router.get('/api/content/skills/users/:user/stats', (req, res) =>
+  res.json(skillExchangeService.getUserStats(req.params.user))
 );
 
 export default router;
