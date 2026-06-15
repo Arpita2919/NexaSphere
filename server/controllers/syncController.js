@@ -78,6 +78,16 @@ export const syncController = {
               const serverUpdated = new Date(current.updated_at);
               const clientKnown = new Date(lastKnownTimestamp);
 
+              if (!lastKnownTimestamp || isNaN(clientKnown.getTime())) {
+                results.push({
+                  id,
+                  type,
+                  status: 'error',
+                  message: 'Invalid or missing lastKnownTimestamp.',
+                });
+                continue;
+              }
+
               if (serverUpdated > clientKnown) {
                 results.push({
                   id,
