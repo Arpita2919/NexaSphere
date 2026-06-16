@@ -34,9 +34,23 @@ jobs:
       - name: Build Admin Dashboard
         run: npm run build --workspace=admin-dashboard
 
+  notify-start:
+    name: Notify Slack Start
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Start Notification
+        run: |
+          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            --data "{\"text\":\"Production deployment started. Triggered by: ${{ github.actor }}\"}"
+
   deploy-backend:
     name: Deploy Backend to Render
-    needs: build
+    needs:
+      - build
+      - notify-start
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -50,7 +64,9 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend to Vercel Production
-    needs: build
+    needs:
+      - build
+      - notify-start
     runs-on: ubuntu-latest
     environment:
       name: production
