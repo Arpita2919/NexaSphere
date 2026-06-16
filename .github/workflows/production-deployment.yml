@@ -1,0 +1,94 @@
+name: Production Deployment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Applications
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build Website
+        run: npm run build --workspace=website
+
+      - name: Build Admin Dashboard
+        run: npm run build --workspace=admin-dashboard
+
+  deploy-backend:
+    name: Deploy Backend to Render
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+
+    steps:
+      - name: Trigger Render Production Deploy
+        uses: johnbeynon/render-deploy-action@v0.0.9
+        with:
+          service-id: ${{ secrets.RENDER_PRODUCTION_SERVICE_ID }}
+          api-key: ${{ secrets.RENDER_API_KEY }}
+
+  deploy-frontend:
+    name: Deploy Frontend to Vercel Production
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to Vercel Production
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          vercel-args: "--prod"
+
+  smoke-test:
+    name: Production Smoke Test
+    needs:
+      - deploy-backend
+      - deploy-frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Backend Health
+        run: |
+          curl -f https://nexasphere-api.onrender.com/health
+
+  create-release:
+    name: Create GitHub Release
+    needs: smoke-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create Release Tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: production-${{ github.run_number }}
+          name: Production Release ${{ github.run_number }}
+          generate_release_notes: true
