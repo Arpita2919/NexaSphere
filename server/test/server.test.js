@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import encryptionManager from "../utils/encryptionManager.js";
 
 import securityPatchManager from "../utils/securityPatchManager.js";
 
@@ -21,5 +22,32 @@ describe("Server", () => {
     const status = "healthy";
     assert.strictEqual(status, "healthy");
   });
+
+  it("should encrypt and decrypt data successfully", () => {
+  const secret = "NexaSphere Secret";
+
+  const encrypted = encryptionManager.encryptData(secret);
+
+  assert.ok(encrypted.encryptedData);
+
+  const decrypted = encryptionManager.decryptData(encrypted);
+
+  assert.strictEqual(decrypted, secret);
+});
+
+
+it("should rotate encryption key", () => {
+  const result = encryptionManager.rotateEncryptionKey();
+
+  assert.ok(result.message);
+  assert.ok(result.rotatedAt);
+});
+
+
+it("should generate encryption audit logs", () => {
+  const logs = encryptionManager.getEncryptionAuditLogs();
+
+  assert.ok(Array.isArray(logs));
+});
 
 });

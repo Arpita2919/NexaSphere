@@ -19,6 +19,7 @@ import { getMigrationStatus } from '../utils/migrationSafety.js';
 import { recordPageLoad } from '../observability/metrics.js';
 import { getServiceHealth, getFailoverStatus } from '../utils/failoverManager.js';
 import securityPatchManager from "../utils/securityPatchManager.js";
+import encryptionManager from "../utils/encryptionManager.js";
 
 function requireMonitoringAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -528,6 +529,39 @@ router.get("/security-patches/report", (req, res) => {
   return res.json({
     success: true,
     data: report,
+  });
+});
+
+// Get encryption security status
+router.get("/encryption-status", (req, res) => {
+  const status = encryptionManager.getEncryptionStatus();
+
+  return res.json({
+    success: true,
+    data: status,
+  });
+});
+
+
+// Rotate encryption key
+router.post("/key-rotation", (req, res) => {
+  const result = encryptionManager.rotateEncryptionKey();
+
+  return res.json({
+    success: true,
+    message: result.message,
+    rotatedAt: result.rotatedAt,
+  });
+});
+
+
+// Get encryption audit logs
+router.get("/encryption-audit", (req, res) => {
+  const logs = encryptionManager.getEncryptionAuditLogs();
+
+  return res.json({
+    success: true,
+    data: logs,
   });
 });
 

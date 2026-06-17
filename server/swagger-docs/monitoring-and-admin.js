@@ -399,4 +399,42 @@
  *         description: Detailed security patch report
  */
 
+/**
+ * @swagger
+ * /api/monitoring/encryption-status:
+ *   get:
+ *     summary: Get encryption security status
+ *     tags:
+ *       - Monitoring
+ *     responses:
+ *       200:
+ *         description: Encryption status details
+ */
+
+
+/**
+ * @swagger
+ * /api/monitoring/key-rotation:
+ *   post:
+ *     summary: Rotate encryption key
+ *     tags:
+ *       - Monitoring
+ *     responses:
+ *       200:
+ *         description: Encryption key rotated successfully
+ */
+
+
+/**
+ * @swagger
+ * /api/monitoring/encryption-audit:
+ *   get:
+ *     summary: Get encryption audit logs
+ *     tags:
+ *       - Monitoring
+ *     responses:
+ *       200:
+ *         description: List of encryption activities
+ */
+
 export default {};
