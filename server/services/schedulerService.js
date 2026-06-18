@@ -151,6 +151,14 @@ const TASK_DEFINITIONS = [
     category: 'collaboration',
     enabled: true,
   },
+  {
+    id: 'announcement-publisher',
+    name: 'Scheduled Announcement Publisher',
+    description: 'Publishes scheduled announcements when their scheduled time has arrived',
+    cron: '*/1 * * * *', // Run every minute
+    category: 'system',
+    enabled: true,
+  },
 ];
 
 // ─── In-memory state ──────────────────────────────────────────────────────────
@@ -271,6 +279,9 @@ class SchedulerService extends EventEmitter {
         console.log('[SchedulerService] Processing overdue task notifications...');
         // logic to fetch tasks with dueDate < now and status != 'Done' and notify assignees
         break;
+      case 'announcement-publisher':
+        await this._publishScheduledAnnouncements();
+        break;
       default:
         throw new Error(`No implementation for task "${task.id}"`);
     }
@@ -289,7 +300,9 @@ class SchedulerService extends EventEmitter {
       const { rows: users } = await client.query(
         `SELECT id, email, full_name FROM student_users WHERE last_login_at > NOW() - INTERVAL '7 days'`
       );
-      logger.info(`[Scheduler] Email digest: ${events.length} recent events, ${users.length} active users`);
+      logger.info(
+        `[Scheduler] Email digest: ${events.length} recent events, ${users.length} active users`
+      );
     });
   }
 
@@ -339,7 +352,13 @@ class SchedulerService extends EventEmitter {
       logger.info('[Scheduler] No database configured, skipping backup');
       return;
     }
-    const tables = ['events', 'student_users', 'core_team_members', 'resources', 'push_subscriptions'];
+    const tables = [
+      'events',
+      'student_users',
+      'core_team_members',
+      'resources',
+      'push_subscriptions',
+    ];
     let totalRows = 0;
     await withDb(async (client) => {
       for (const table of tables) {
@@ -415,13 +434,37 @@ class SchedulerService extends EventEmitter {
       const { rows: totalUsers } = await client.query(
         'SELECT COUNT(*) as count FROM student_users'
       );
-      const { rows: totalEvents } = await client.query(
-        'SELECT COUNT(*) as count FROM events'
-      );
+      const { rows: totalEvents } = await client.query('SELECT COUNT(*) as count FROM events');
       logger.info(
         `[Scheduler] Analytics snapshot: ${totalUsers[0]?.count || 0} users, ${totalEvents[0]?.count || 0} events`
       );
     });
+  }
+
+  async _publishScheduledAnnouncements() {
+    logger.info('[Scheduler] Checking for scheduled announcements to publish...');
+    if (!HAS_SUPABASE) {
+      logger.info('[Scheduler] No database configured, skipping scheduled announcement publishing');
+      return;
+    }
+    try {
+      const { announcementsRepository } =
+        await import('../repositories/announcementsRepository.js');
+      const { default: eventManager } = await import('./eventEmitterService.js');
+      const published = await announcementsRepository.publishScheduled();
+      if (published && published.length > 0) {
+        logger.info(`[Scheduler] Published ${published.length} scheduled announcements.`);
+        for (const ann of published) {
+          eventManager.emit('admin-announcement', {
+            title: ann.title,
+            message: ann.content,
+            link: ann.ctaUrl,
+          });
+        }
+      }
+    } catch (err) {
+      logger.error('[Scheduler] Error publishing scheduled announcements:', err.message);
+    }
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────
