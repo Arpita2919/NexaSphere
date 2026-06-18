@@ -27,6 +27,7 @@ import portfolioRouter from './routes/portfolio.js';
 import notificationsRouter from './routes/notifications.js';
 import adminRouter from './routes/admin.js';
 import announcementsRouter from './routes/announcements.js';
+import bulkRouter from './routes/bulk.js';
 import { validateEnvironment } from './utils/envValidator.js';
 import { performanceMonitor } from './middleware/performanceMonitor.js';
 import { tracingMiddleware } from './middleware/tracingMiddleware.js';
@@ -324,6 +325,7 @@ app.use('/api', formsRouter);
 app.use('/api', portfolioRouter);
 app.use('/api', notificationsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/admin', bulkRouter);
 app.use('/', announcementsRouter);
 app.use('/', syncRouter);
 
