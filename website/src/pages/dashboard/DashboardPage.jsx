@@ -4,6 +4,7 @@ import QuestTracker from '../../components/dashboard/QuestTracker';
 import Leaderboard from '../../components/dashboard/Leaderboard';
 import AiMentor from '../../components/dashboard/AiMentor';
 import { buildUrl, getAiApiBase, getApiBase } from '../../utils/runtimeConfig';
+import { useTheme } from '../../hooks/useTheme';
 
 function DashboardCardSkeleton({ count = 3 }) {
   return (
@@ -43,6 +44,7 @@ function DashboardCardSkeleton({ count = 3 }) {
 }
 
 export default function DashboardPage({ onBack }) {
+  const { theme: currentTheme, setTheme } = useTheme();
   // Mock current user for demonstration
   const [currentUser] = useState({ id: 'user_123', name: 'Explorer' });
   const [interests, setInterests] = useState([]);
@@ -210,6 +212,93 @@ export default function DashboardPage({ onBack }) {
             }}
           >
             <InterestSelector selectedInterests={interests} onToggleInterest={toggleInterest} />
+          </div>
+
+          <div
+            style={{
+              background: 'var(--bg-glass)',
+              padding: '24px',
+              borderRadius: '16px',
+              border: '1px solid var(--b2)',
+            }}
+          >
+            <h3 style={{ marginBottom: '12px', color: 'var(--t1)', fontFamily: 'Orbitron, sans-serif' }}>
+              Theme Settings
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--t2)' }}>Choose your appearance preference:</span>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  onClick={() => setTheme('light')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: currentTheme === 'light' ? 'var(--c1)' : 'rgba(255,255,255,0.04)',
+                    color: currentTheme === 'light' ? '#fff' : 'var(--t1)',
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    fontWeight: currentTheme === 'light' ? '700' : '500',
+                  }}
+                  onMouseOver={(e) => {
+                    if (currentTheme !== 'light') e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                  }}
+                  onMouseOut={(e) => {
+                    if (currentTheme !== 'light') e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                  }}
+                >
+                  Light
+                </button>
+                <button
+                  onClick={() => setTheme('dark')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: currentTheme === 'dark' ? 'var(--c1)' : 'rgba(255,255,255,0.04)',
+                    color: currentTheme === 'dark' ? '#fff' : 'var(--t1)',
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    fontWeight: currentTheme === 'dark' ? '700' : '500',
+                  }}
+                  onMouseOver={(e) => {
+                    if (currentTheme !== 'dark') e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                  }}
+                  onMouseOut={(e) => {
+                    if (currentTheme !== 'dark') e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                  }}
+                >
+                  Dark
+                </button>
+                <button
+                  onClick={() => setTheme('system')}
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: currentTheme === 'system' ? 'var(--c1)' : 'rgba(255,255,255,0.04)',
+                    color: currentTheme === 'system' ? '#fff' : 'var(--t1)',
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    fontWeight: currentTheme === 'system' ? '700' : '500',
+                  }}
+                  onMouseOver={(e) => {
+                    if (currentTheme !== 'system') e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                  }}
+                  onMouseOut={(e) => {
+                    if (currentTheme !== 'system') e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                  }}
+                >
+                  System
+                </button>
+              </div>
+            </div>
           </div>
 
           <div

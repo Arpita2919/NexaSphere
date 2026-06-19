@@ -24,6 +24,9 @@ export const studentUsersRepository = {
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_student_users_email ON student_users(email)
       `);
+      await client.query(`
+        ALTER TABLE student_users ADD COLUMN IF NOT EXISTS theme VARCHAR(10) DEFAULT NULL;
+      `);
     });
   },
 
@@ -89,6 +92,17 @@ export const studentUsersRepository = {
       const { rows } = await client.query(
         'UPDATE student_users SET role = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
         [role, id]
+      );
+      return rows[0] || null;
+    });
+  },
+
+  async updateTheme(id, theme) {
+    if (!HAS_SUPABASE) return null;
+    return withDb(async (client) => {
+      const { rows } = await client.query(
+        'UPDATE student_users SET theme = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+        [theme, id]
       );
       return rows[0] || null;
     });
