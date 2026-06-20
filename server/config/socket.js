@@ -9,7 +9,7 @@ import { getAdminSession } from '../repositories/adminSessionsRepository.js';
 import { resolveAdminPermissions, getRoomsForPermissions } from './eventPermissions.js';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { getRedisClient } from '../utils/redis.js';
-import { liveQaService } from '../services/liveQaService.js';
+import { waitingRoomService } from '../services/waitingRoomService.js';
 
 let io = null;
 const connectedUsers = new Map();
@@ -356,95 +356,56 @@ export function _onConnection(socket) {
     }
   });
 
-  // ── Live Q&A and Polling ──
-  socket.on('qa:join', ({ eventId } = {}) => {
-    if (typeof eventId !== 'string' || !eventId) return;
-    liveQaService.joinRoom(socket, eventId);
+  // Waiting room — join queue
+  socket.on('waiting:join', ({ eventId, fullName, email, isPriority } = {}) => {
+    if (!eventId || !email || !fullName) return;
+    const userId = socket.id;
+    const result = waitingRoomService.joinQueue(eventId, { userId, fullName, email, isPriority });
+    socket.join(`waiting:${eventId}`);
+    socket.emit('waiting:joined', { eventId, ...result });
   });
 
-  socket.on('qa:leave', ({ eventId } = {}) => {
-    if (typeof eventId !== 'string' || !eventId) return;
-    liveQaService.leaveRoom(socket, eventId);
+  // Waiting room — get current queue status
+  socket.on('waiting:status', ({ eventId } = {}) => {
+    if (!eventId) return;
+    const queue = waitingRoomService.getQueue(eventId);
+    socket.emit('waiting:status:update', { eventId, queue, total: queue.length });
   });
 
-  socket.on('qa:ask', (data) => {
-    if (!data || typeof data !== 'object') return;
-    const { eventId, askedBy, email, text, isAnonymous } = data;
-    if (typeof eventId !== 'string' || typeof text !== 'string' || !text.trim()) return;
-    const result = liveQaService.askQuestion({
-      eventId,
-      askedBy: String(askedBy || 'Anonymous').slice(0, 100),
-      email: String(email || '').slice(0, 256),
-      text: String(text).trim().slice(0, 1000),
-      isAnonymous: !!isAnonymous,
-    });
-    socket.emit('qa:asked', result);
+  // Waiting room — admin admit one
+  socket.on('waiting:admit-one', ({ eventId } = {}) => {
+    if (!socket.adminAuthenticated || !eventId) return;
+    const entry = waitingRoomService.admitOne(eventId);
+    if (entry) {
+      socket.emit('waiting:admitted-entry', { eventId, entry });
+    }
   });
 
-  socket.on('qa:list', ({ eventId, sortBy } = {}) => {
-    if (typeof eventId !== 'string') return;
-    const result = liveQaService.listQuestions(eventId, sortBy);
-    socket.emit('qa:list', result);
+  // Waiting room — admin admit all
+  socket.on('waiting:admit-all', ({ eventId } = {}) => {
+    if (!socket.adminAuthenticated || !eventId) return;
+    const admitted = waitingRoomService.admitAll(eventId);
+    socket.emit('waiting:admitted-entries', { eventId, count: admitted.length });
   });
 
-  socket.on('qa:upvote', ({ eventId, questionId } = {}) => {
-    if (typeof eventId !== 'string' || typeof questionId !== 'string') return;
-    const userId = socket.adminAuthenticated
-      ? `admin:${socket.adminSession?.id || 'unknown'}`
-      : socket.id;
-    const result = liveQaService.upvoteQuestion(eventId, questionId, userId);
-    socket.emit('qa:upvoted', result);
+  // Waiting room — admin remove attendee
+  socket.on('waiting:remove', ({ eventId, entryId } = {}) => {
+    if (!socket.adminAuthenticated || !eventId || !entryId) return;
+    waitingRoomService.removeFromQueue(eventId, entryId);
+    socket.emit('waiting:removed-entry', { eventId, entryId });
   });
 
-  socket.on('qa:answer', ({ eventId, questionId, answer } = {}) => {
-    if (typeof eventId !== 'string' || typeof questionId !== 'string' || typeof answer !== 'string')
-      return;
-    const answeredBy = socket.adminAuthenticated
-      ? socket.adminSession?.username || 'Speaker'
-      : 'Speaker';
-    liveQaService.answerQuestion(eventId, questionId, answer, answeredBy);
+  // Waiting room — admin move to front
+  socket.on('waiting:move-front', ({ eventId, entryId } = {}) => {
+    if (!socket.adminAuthenticated || !eventId || !entryId) return;
+    waitingRoomService.moveToFront(eventId, entryId);
+    socket.emit('waiting:moved-front', { eventId, entryId });
   });
 
-  socket.on('qa:moderate', ({ eventId, questionId, action } = {}) => {
-    if (typeof eventId !== 'string' || typeof questionId !== 'string' || typeof action !== 'string')
-      return;
-    liveQaService.moderateQuestion(eventId, questionId, action);
-  });
-
-  socket.on('poll:create', (data) => {
-    if (!data || typeof data !== 'object') return;
-    const { eventId, question, options, type } = data;
-    if (
-      typeof eventId !== 'string' ||
-      typeof question !== 'string' ||
-      !Array.isArray(options) ||
-      options.length < 2
-    )
-      return;
-    liveQaService.createPoll({ eventId, question, options, type });
-  });
-
-  socket.on('poll:vote', ({ eventId, pollId, optionIds } = {}) => {
-    if (typeof eventId !== 'string' || typeof pollId !== 'string' || !optionIds) return;
-    const voterId = socket.id;
-    liveQaService.votePoll(eventId, pollId, optionIds, voterId);
-  });
-
-  socket.on('poll:list', ({ eventId } = {}) => {
-    if (typeof eventId !== 'string') return;
-    const result = liveQaService.listPolls(eventId);
-    socket.emit('poll:list', result);
-  });
-
-  socket.on('poll:results', ({ eventId, pollId } = {}) => {
-    if (typeof eventId !== 'string' || typeof pollId !== 'string') return;
-    const result = liveQaService.getPollResults(eventId, pollId);
-    socket.emit('poll:results', result);
-  });
-
-  socket.on('poll:close', ({ eventId, pollId } = {}) => {
-    if (typeof eventId !== 'string' || typeof pollId !== 'string') return;
-    liveQaService.closePoll(eventId, pollId);
+  // Waiting room — admin send message to waiting room
+  socket.on('waiting:send-message', ({ eventId, message } = {}) => {
+    if (!socket.adminAuthenticated || !eventId || !message) return;
+    waitingRoomService.sendMessage(eventId, message);
   });
 
   // Handle disconnection

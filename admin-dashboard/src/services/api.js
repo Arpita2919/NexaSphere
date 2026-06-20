@@ -761,27 +761,68 @@ async function fetchWithAuth(url, options = {}) {
         }
       }
 
-      // /api/admin/sponsors
-      else if (url.startsWith('/api/admin/sponsors')) {
-        let sponsors = getDb('sponsors', []);
-        if (method === 'GET') resolve({ sponsors });
-        if (method === 'POST') {
-          const newSponsor = { ...body, id: Date.now().toString() };
-          sponsors = [newSponsor, ...sponsors];
-          setDb('sponsors', sponsors);
-          resolve(newSponsor);
+      // /api/admin/events/:id/waiting-room
+      else if (url.match(/\/api\/admin\/events\/[^\/]+\/waiting-room/)) {
+        const eventId = url.split('/')[4];
+        const action = url.split('/')[6];
+        let queue = getDb(`waiting_${eventId}`, [
+          {
+            id: 'wr_mock_1',
+            fullName: 'Anjali Sharma',
+            email: 'anjali@example.com',
+            isPriority: false,
+            joinedAt: new Date(Date.now() - 120000).toISOString(),
+          },
+          {
+            id: 'wr_mock_2',
+            fullName: 'Rahul Verma',
+            email: 'rahul@example.com',
+            isPriority: false,
+            joinedAt: new Date(Date.now() - 90000).toISOString(),
+          },
+          {
+            id: 'wr_mock_3',
+            fullName: 'Priya Kapoor',
+            email: 'priya@example.com',
+            isPriority: true,
+            joinedAt: new Date(Date.now() - 60000).toISOString(),
+          },
+        ]);
+        if (method === 'GET') resolve({ queue, total: queue.length });
+        if (method === 'POST' && !action) {
+          const newEntry = { ...body, id: `wr_${Date.now()}`, joinedAt: new Date().toISOString() };
+          queue = [...queue, newEntry];
+          setDb(`waiting_${eventId}`, queue);
+          resolve(newEntry);
         }
-        if (method === 'PUT') {
-          const id = url.split('/').pop();
-          sponsors = sponsors.map((s) => (s.id === id ? { ...body, id } : s));
-          setDb('sponsors', sponsors);
-          resolve({ ...body, id });
+        if (method === 'POST' && action === 'admit-one') {
+          const [admitted, ...rest] = queue;
+          setDb(`waiting_${eventId}`, rest);
+          resolve({ admitted });
+        }
+        if (method === 'POST' && action === 'admit-all') {
+          const count = queue.length;
+          setDb(`waiting_${eventId}`, []);
+          resolve({ count, admitted: true });
+        }
+        if (method === 'POST' && action === 'move-front') {
+          const entryId = url.split('/')[5];
+          const idx = queue.findIndex((e) => e.id === entryId);
+          if (idx >= 0) {
+            const [entry] = queue.splice(idx, 1);
+            queue.unshift({ ...entry, isPriority: true });
+            setDb(`waiting_${eventId}`, queue);
+          }
+          resolve({ ok: true });
+        }
+        if (method === 'POST' && action === 'message') {
+          resolve({ ok: true });
         }
         if (method === 'DELETE') {
-          const id = url.split('/').pop();
-          sponsors = sponsors.filter((s) => s.id !== id);
-          setDb('sponsors', sponsors);
-          resolve({ success: true });
+          const entryId = url.split('/')[5];
+          queue = queue.filter((e) => e.id !== entryId);
+          setDb(`waiting_${eventId}`, queue);
+          resolve({ ok: true });
         }
       }
 
@@ -1406,57 +1447,32 @@ export const api = {
       }),
   },
 
-  qaPoll: {
-    getQuestions: (eventId, sortBy = 'upvotes') =>
-      fetchWithAuth(`/api/admin/qa/${eventId}/questions?sortBy=${sortBy}`),
-    getPolls: (eventId) => fetchWithAuth(`/api/admin/qa/${eventId}/polls`),
-    moderateQuestion: async (eventId, questionId, action) => {
-      const result = await fetchWithAuth(
-        `/api/admin/qa/${eventId}/questions/${questionId}/moderate`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ action }),
-        }
-      );
-      eventEmitter.emit(EVENTS.QA_UPDATED, result);
-      return result;
-    },
-    answerQuestion: async (eventId, questionId, answer) => {
-      const result = await fetchWithAuth(
-        `/api/admin/qa/${eventId}/questions/${questionId}/answer`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ answer }),
-        }
-      );
-      eventEmitter.emit(EVENTS.QA_UPDATED, result);
-      return result;
-    },
-    upvoteQuestion: async (eventId, questionId) => {
-      const result = await fetchWithAuth(
-        `/api/admin/qa/${eventId}/questions/${questionId}/upvote`,
-        {
-          method: 'POST',
-        }
-      );
-      eventEmitter.emit(EVENTS.QA_UPDATED, result);
-      return result;
-    },
-    createPoll: async (eventId, poll) => {
-      const result = await fetchWithAuth(`/api/admin/qa/${eventId}/polls`, {
+  waitingRoom: {
+    getQueue: (eventId) =>
+      fetchWithAuth(`/api/admin/events/${encodeURIComponent(eventId)}/waiting-room`),
+    admitOne: (eventId) =>
+      fetchWithAuth(`/api/admin/events/${encodeURIComponent(eventId)}/waiting-room/admit-one`, {
         method: 'POST',
-        body: JSON.stringify(poll),
-      });
-      eventEmitter.emit(EVENTS.POLL_UPDATED, result);
-      return result;
-    },
-    closePoll: async (eventId, pollId) => {
-      const result = await fetchWithAuth(`/api/admin/qa/${eventId}/polls/${pollId}/close`, {
+      }),
+    admitAll: (eventId) =>
+      fetchWithAuth(`/api/admin/events/${encodeURIComponent(eventId)}/waiting-room/admit-all`, {
         method: 'POST',
-      });
-      eventEmitter.emit(EVENTS.POLL_UPDATED, result);
-      return result;
-    },
+      }),
+    remove: (eventId, entryId) =>
+      fetchWithAuth(
+        `/api/admin/events/${encodeURIComponent(eventId)}/waiting-room/${encodeURIComponent(entryId)}`,
+        { method: 'DELETE' }
+      ),
+    moveToFront: (eventId, entryId) =>
+      fetchWithAuth(
+        `/api/admin/events/${encodeURIComponent(eventId)}/waiting-room/${encodeURIComponent(entryId)}/move-front`,
+        { method: 'POST' }
+      ),
+    sendMessage: (eventId, message) =>
+      fetchWithAuth(`/api/admin/events/${encodeURIComponent(eventId)}/waiting-room/message`, {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      }),
   },
 
   impersonate: {

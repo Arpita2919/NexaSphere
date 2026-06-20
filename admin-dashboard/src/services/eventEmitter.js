@@ -88,11 +88,7 @@ export const EVENTS = {
 
   ANNOUNCEMENT_DELETED: 'announcement:deleted',
 
-  SPONSOR_CREATED: 'sponsor:created',
-
-  SPONSOR_UPDATED: 'sponsor:updated',
-
-  SPONSOR_DELETED: 'sponsor:deleted',
+  WAITING_ROOM_UPDATED: 'waiting-room:updated',
 
   // RBAC events
   ROLE_CREATED: 'role:created',

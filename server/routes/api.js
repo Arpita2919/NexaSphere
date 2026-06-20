@@ -14,7 +14,7 @@ import { authRateLimiter, protectedActionRateLimiter } from '../middleware/authR
 import { portfolioRepository } from '../repositories/portfolioRepository.js';
 import { achievementsRepository } from '../repositories/achievementsRepository.js';
 import { portfolioService } from '../services/portfolioService.js';
-import * as subscriptionsController from '../controllers/subscriptionsController.js';
+import { waitingRoomService } from '../services/waitingRoomService.js';
 
 const router = Router();
 
@@ -319,19 +319,16 @@ router.delete(
   }
 );
 
-// Impersonation (Super Admin only)
-router.post(
-  '/api/admin/impersonate/start/:userId',
-  adminAuthMiddleware.requireAdmin,
+// Waiting room management API
+// Waiting room management API
+router.get(
+  '/api/admin/events/:eventId/waiting-room',
+  adminAuthMiddleware.requireScope('events:read'),
   async (req, res) => {
     try {
-      const role = req.adminSession.metadata?.role || '';
-      if (role !== 'SuperAdmin')
-        return res.status(403).json({ error: 'Only Super Admin can impersonate' });
-      const user = await usersRepository.getById(req.params.userId);
-      if (!user) return res.status(404).json({ error: 'User not found' });
-      impersonationService.start(req.adminSession.token, user);
-      return res.json({ impersonating: true, user });
+      const eventId = String(req.params.eventId || '').trim();
+      const queue = waitingRoomService.getQueue(eventId);
+      return res.json({ queue, total: queue.length });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
