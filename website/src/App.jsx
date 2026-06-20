@@ -470,8 +470,8 @@ function AppShell() {
 
     return () => {
       alive = false;
-      document.removeEventListener('visibilitychange', onVisibilityChange);
       off('content:updated', onContentUpdated);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
 
