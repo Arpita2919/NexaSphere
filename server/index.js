@@ -542,7 +542,6 @@ function withContentLock(fn) {
   return current.then(() => fn()).finally(() => release());
 }
 
-export async function supabaseRequest(pathname, { method = 'GET', body } = {}) {
 const _rawSupabaseRequest = async function _rawSupabaseRequest(
   pathname,
   { method = 'GET', body } = {}
@@ -567,7 +566,7 @@ const _rawSupabaseRequest = async function _rawSupabaseRequest(
   return text ? JSON.parse(text) : [];
 };
 
-export const supabaseRequest = _rawSupabaseRequest;
+export { _rawSupabaseRequest as supabaseRequest };
 
 export const supabaseBreaker = circuitBreakerRegistry.register(
   'index-supabase',
