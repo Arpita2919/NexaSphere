@@ -54,7 +54,7 @@ function scheduleJob(reportType, cronExpression, enabled) {
       const report = await runReport(reportType);
       console.log(`[scheduler] Report generated: ${report.filename}`);
     } catch (err) {
-      console.error(`[scheduler] Report failed for ${reportType}:`, err.message);
+      console.error('[scheduler] Report failed for %s:', String(reportType), err.message);
     }
   });
 
