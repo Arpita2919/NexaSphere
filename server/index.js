@@ -371,6 +371,11 @@ app.use(enhancedTracingMiddleware);
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(xssSanitizer);
+if (useStructuredHttpLog) {
+  app.use(apiLogger);
+} else {
+  app.use(morgan('combined'));
+}
 app.use(apiLogger);
 app.use(performanceMonitor);
 app.use(cookieParser());
