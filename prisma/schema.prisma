@@ -177,28 +177,62 @@ model SettingsChangeLog {
   @@index([changedById])
 }
 
-model EventPricing {
-  id            String         @id @default(uuid())
-  eventId       String         @unique
-  basePrice     Float
-  currentPrice  Float
-  minPrice      Float
-  maxPrice      Float
-  capacity      Int
-  registrations Int            @default(0)
-  eventDate     DateTime
-  adminOverride Float?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  priceHistory  PriceHistory[]
+model Form {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  eventId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  fields      FormField[]
+  logic       FormLogic[]
+  responses   FormResponse[]
 }
 
-model PriceHistory {
-  id        String   @id @default(uuid())
-  pricingId String
-  price     Float
-  reason    String
-  createdAt DateTime @default(now())
+model FormField {
+  id          String   @id @default(cuid())
+  formId      String
+  type        String
+  label       String
+  required    Boolean  @default(false)
+  options     Json?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  pricing   EventPricing @relation(fields: [pricingId], references: [id], onDelete: Cascade)
+  form        Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers     FormAnswer[]
+}
+
+model FormLogic {
+  id          String   @id @default(cuid())
+  formId      String
+  condition   Json
+  action      Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  form        Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
+}
+
+model FormResponse {
+  id          String   @id @default(cuid())
+  formId      String
+  userId      String?
+  createdAt   DateTime @default(now())
+
+  form        Form         @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers     FormAnswer[]
+}
+
+model FormAnswer {
+  id           String   @id @default(cuid())
+  responseId   String
+  fieldId      String
+  value        Json
+  createdAt    DateTime @default(now())
+
+  response     FormResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  field        FormField    @relation(fields: [fieldId], references: [id], onDelete: Cascade)
 }
